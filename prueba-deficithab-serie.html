@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>% Déficit Habitacional — cod_var 45 y 46 (2017–2024, JSONP)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial,Segoe UI}
+    .wrap{display:flex;flex-direction:column;gap:18px;padding:10px}
+    .card{height:46vh;min-height:360px;border:1px solid #eee;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06)}
+    .title{font-weight:700;font-size:15px;margin:10px 14px}
+    .chart{height:calc(100% - 38px);width:100%}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="title">% Déficit Habitacional — <b>cod_var 45</b> · Nacional (HOGAR) · 2017–2024</div>
+    <div id="chart45" class="chart"></div>
+  </div>
+  <div class="card">
+    <div class="title">% Déficit Habitacional — <b>cod_var 46</b> · Nacional (HOGAR) · 2017–2024</div>
+    <div id="chart46" class="chart"></div>
+  </div>
+</div>
+
+<script>
+/* ================== CONFIGURACIÓN ================== */
+
+// Servicio y filtro base (usa anio explícito 2017..2024)
+const FS_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap/FeatureServer/6";
+const WHERE_BASE =
+  "region_nombre = 'NACIONAL' AND tipo = 'HOGAR' AND cod_var IN (45,46) AND anio >= 2017 AND anio <= 2024";
+const FIELDS = ["cod_var","anio","porcentaje_total","porcentaje_urbano","porcentaje_rural"];
+
+// Rango fijo de años a mostrar
+const YEAR_START = 2017, YEAR_END = 2024;
+const YEAR_RANGE = Array.from({length: YEAR_END - YEAR_START + 1}, (_,i)=> YEAR_START+i);
+
+// Timeline
+const TIMELINE_AUTOPLAY = true;
+const TIMELINE_INTERVAL = 1800; // ms
+
+// ===== Aquí editas tus notas de picos =====
+const PEAK_NOTES_45 = [
+  // { series: "total",  year: 2022, text: "Comentario 45 total" },
+  // { series: "urbano", year: 2023, text: "Comentario 45 urbano" },
+  // { series: "rural",  year: 2020, text: "Comentario 45 rural" },
+];
+const PEAK_NOTES_46 = [
+  // { series: "total",  year: 2021, text: "Comentario 46 total" },
+];
+
+/* ================== UTILIDADES ================== */
+
+// JSONP: crea un <script src="...&callback=func"> y resuelve con la respuesta
+function jsonp(url, callbackName = "cb_"+Math.random().toString(36).slice(2)) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    const cleanup = () => { delete window[callbackName]; document.body.removeChild(script); };
+    window[callbackName] = (data) => { cleanup(); resolve(data); };
+    script.onerror = (e) => { cleanup(); reject(e); };
+    script.src = url + `&callback=${callbackName}`;
+    document.body.appendChild(script);
+  });
+}
+
+function seriesToFullRange(rows, valueField) {
+  const byYear = new Map();
+  rows.forEach(r => byYear.set(Number(r.anio), r[valueField]));
+  const years = YEAR_RANGE.map(y => String(y));
+  const values = YEAR_RANGE.map(y => {
+    const v = byYear.get(y);
+    return (v == null ? null : Number(v));
+  });
+  return { years, values };
+}
+
+function buildStaticMarkPoints(rows, notes){
+  const byYear = new Map();
+  rows.forEach(r => byYear.set(Number(r.anio), {
+    total:  r.porcentaje_total,
+    urbano: r.porcentaje_urbano,
+    rural:  r.porcentaje_rural
+  }));
+  const mp = { total: [], urbano: [], rural: [] };
+  for (const n of notes) {
+    const y = byYear.get(n.year);
+    if (!y || y[n.series] == null) continue;
+    mp[n.series].push({
+      coord: [String(n.year), Number(y[n.series])],
+      symbolSize: 1,
+      label: {
+        show: true,
+        formatter: n.text,
+        position: 'top',
+        padding: [6,8],
+        borderRadius: 6,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        color: '#fff',
+        fontSize: 12
+      }
+    });
+  }
+  return mp;
+}
+
+function frameOptionsForYear(year, years, totals, urbanos, rurals, staticMP){
+  const i = years.indexOf(String(year));
+  const t = i >= 0 ? totals[i]  : null;
+  const u = i >= 0 ? urbanos[i] : null;
+  const r = i >= 0 ? rurals[i]  : null;
+
+  const withHighlight = (mpList, yVal, label) => {
+    const arr = (mpList || []).slice();
+    if (yVal != null) {
+      arr.push({
+        coord: [String(year), Number(yVal)],
+        symbol: 'circle',
+        symbolSize: 10,
+        itemStyle: { borderWidth: 2 },
+        label: {
+          show: true,
+          formatter: `${label}: {c}%`,
+          position: 'top',
+          padding: [4,6],
+          borderRadius: 4,
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          color: '#fff',
+          fontSize: 11
+        }
+      });
+    }
+    return arr;
+  };
+
+  return {
+    title: { subtext: `Año: ${year}` },
+    xAxis: [{ axisPointer: { show: true, value: String(year) } }],
+    series: [
+      { markLine: { data: [{ xAxis: String(year) }] }, markPoint: { data: withHighlight(staticMP.total,  t, "Total")  } },
+      { markLine: { data: [{ xAxis: String(year) }] }, markPoint: { data: withHighlight(staticMP.urbano, u, "Urbano") } },
+      { markLine: { data: [{ xAxis: String(year) }] }, markPoint: { data: withHighlight(staticMP.rural,  r, "Rural")  } },
+    ]
+  };
+}
+
+function buildChartOption(rows, notes){
+  // ordenar por anio
+  rows.sort((a,b)=>a.anio-b.anio);
+
+  const { years, values: totalVals }  = seriesToFullRange(rows, "porcentaje_total");
+  const { values: urbanoVals }        = seriesToFullRange(rows, "porcentaje_urbano");
+  const { values: ruralVals }         = seriesToFullRange(rows, "porcentaje_rural");
+
+  const staticMP = buildStaticMarkPoints(rows, notes);
+
+  const baseOption = {
+    backgroundColor: '#fff',
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: v => (v == null ? '—' : `${Number(v).toFixed(2)} %`)
+    },
+    legend: { top: 6, right: 12, data: ['Total','Urbano','Rural'] },
+    grid: { left: 64, right: 24, bottom: 54, top: 26 },
+    xAxis: [{
+      type: 'category',
+      boundaryGap: false,
+      name: 'Año',
+      nameGap: 22,
+      data: years
+    }],
+    yAxis: [{
+      type: 'value',
+      name: '% Déficit habitacional',
+      nameGap: 26,
+      axisLabel: { formatter: v => `${v}%` }
+    }],
+    // SIN sliders/dataZoom
+    timeline: {
+      axisType: 'category',
+      autoPlay: TIMELINE_AUTOPLAY,
+      playInterval: TIMELINE_INTERVAL,
+      loop: true,
+      bottom: 8,
+      data: YEAR_RANGE.map(String),
+      label: { formatter: s => s }
+    },
+    series: [
+      { name: 'Total',  type: 'line', smooth: true, showSymbol: false, data: totalVals,  markPoint: { data: staticMP.total  } },
+      { name: 'Urbano', type: 'line', smooth: true, showSymbol: false, data: urbanoVals, markPoint: { data: staticMP.urbano } },
+      { name: 'Rural',  type: 'line', smooth: true, showSymbol: false, data: ruralVals,  markPoint: { data: staticMP.rural  } },
+    ],
+    animationDuration: 500
+  };
+
+  const options = YEAR_RANGE.map(y =>
+    frameOptionsForYear(y, years, totalVals, urbanoVals, ruralVals, staticMP)
+  );
+
+  return { baseOption, options };
+}
+
+/* ================== CARGA (JSONP) Y RENDER ================== */
+
+async function main(){
+  const query =
+    `${FS_URL}/query?where=${encodeURIComponent(WHERE_BASE)}`
+    + `&outFields=${FIELDS.join(',')}`
+    + `&orderByFields=cod_var,anio&returnGeometry=false&f=json`;
+
+  try {
+    const json = await jsonp(query); // <<< JSONP en vez de fetch
+    const feats = (json.features || []).map(f => f.attributes);
+
+    const rows45 = feats.filter(r => Number(r.cod_var) === 45);
+    const rows46 = feats.filter(r => Number(r.cod_var) === 46);
+
+    const chart45 = echarts.init(document.getElementById('chart45'));
+    const chart46 = echarts.init(document.getElementById('chart46'));
+
+    const opt45 = buildChartOption(rows45, PEAK_NOTES_45);
+    const opt46 = buildChartOption(rows46, PEAK_NOTES_46);
+
+    chart45.setOption({ baseOption: opt45.baseOption, options: opt45.options });
+    chart46.setOption({ baseOption: opt46.baseOption, options: opt46.options });
+
+    window.addEventListener('resize', () => { chart45.resize(); chart46.resize(); });
+  } catch (e) {
+    console.error(e);
+    alert('No se pudo consultar el servicio (ver consola).');
+  }
+}
+
+main();
+</script>
+</body>
+</html>
