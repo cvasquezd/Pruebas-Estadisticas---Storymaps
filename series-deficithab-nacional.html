@@ -35,7 +35,8 @@
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
 
   // (Opcional) Si necesitas filtrar más (ej. 'region_nombre = NACIONAL'), agrega al WHERE.
-  const WHERE = "cod_var = 45";
+  const WHERE = "cod_var = 45 AND region_nombre = 'NACIONAL'"
+;
 
   // === 2) MENSAJES PERSONALIZABLES PARA LOS PICOS ============================
   // Pon aquí tus mensajes por serie, usando el AÑO del pico como clave.
