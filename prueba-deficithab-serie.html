@@ -29,7 +29,7 @@
 /* ================== CONFIGURACIÓN ================== */
 
 // Servicio y filtro base (usa anio explícito 2017..2024)
-const FS_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap/FeatureServer/6";
+const FS_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap/FeatureServer/6/query";
 const WHERE_BASE =
   "region_nombre = 'NACIONAL' AND tipo = 'HOGAR' AND cod_var IN (45,46) AND anio >= 2017 AND anio <= 2024";
 const FIELDS = ["cod_var","anio","porcentaje_total","porcentaje_urbano","porcentaje_rural"];
