@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>% Total / Urbano / Rural — Stacked Line (2017–2024)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:76vh;min-height:520px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>% Total / Urbano / Rural — líneas apiladas (cod_var = 45)</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code> · Filtro: NACIONAL, 2017–2024</p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  // === Servicio y filtro ===
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 45 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+
+  // Mensajes personalizables para picos (usa el año como clave)
+  const peakMessages = {
+    total:  { /* "2021": "Máximo TOTAL 2021" */ },
+    urbano: { /* "2020": "Pico URBANO 2020" */ },
+    rural:  { /* "2019": "Pico RURAL 2019" */ }
+  };
+
+  const $err = document.getElementById('err');
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+  // Carga datos (una sola llamada; sin paginación)
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        total:  +Number(r.porcentaje_total ?? 0).toFixed(2),
+        urbano: +Number(r.porcentaje_urbano ?? 0).toFixed(2),
+        rural:  +Number(r.porcentaje_rural  ?? 0).toFixed(2),
+      }));
+  }
+
+  // Init chart
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  // Se irá llenando año a año
+  const progressive = [];
+
+  const option = {
+    backgroundColor: '#ffffff',
+    grid: { left: 64, right: 28, top: 84, bottom: 60, containLabel: true }, // más top para la leyenda
+    legend: {
+      top: 16, left: 'center',
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 },
+      data: ['Urbano (apilado)','Rural (apilado)','Total (línea)']
+    },
+    toolbox: {
+      right: 10, feature: { saveAsImage: {} }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      valueFormatter: v => (v == null || isNaN(v) ? '—' : v.toFixed(2) + '%'),
+      formatter: function (params) {
+        const year = params[0]?.axisValueLabel || '';
+        const lines = [`<b>${year}</b>`];
+        params.forEach(p => {
+          if (p.value == null || isNaN(p.value)) return;
+          lines.push(`${p.marker} ${p.seriesName}: <b>${(+p.value).toFixed(2)}%</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    dataset: [{ id: 'progress', source: progressive }],
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 36,
+      axisTick: { alignWithLabel: true }
+    },
+    yAxis: {
+      type: 'value',
+      name: '%',
+      nameTextStyle: { padding: [0,0,0,-4] },
+      axisLabel: { formatter: '{value}%' },
+      splitLine: { show: true }
+    },
+    animation: true,
+    animationDuration: 800,
+    animationEasing: 'linear',
+    series: [
+      // Apiladas
+      { name:'Urbano (apilado)', type:'line', smooth:true, showSymbol:false, stack:'sum',
+        datasetId:'progress', encode:{x:'anio', y:'urbano'}, emphasis:{focus:'series'},
+        areaStyle:{opacity:0.15}, markPoint:{data:[]} },
+      { name:'Rural (apilado)', type:'line', smooth:true, showSymbol:false, stack:'sum',
+        datasetId:'progress', encode:{x:'anio', y:'rural'}, emphasis:{focus:'series'},
+        areaStyle:{opacity:0.15}, markPoint:{data:[]} },
+      // Total (no apilada, trazo más notorio)
+      { name:'Total (línea)', type:'line', smooth:true, showSymbol:false,
+        lineStyle:{ width:2.2 }, datasetId:'progress', encode:{x:'anio', y:'total'},
+        emphasis:{focus:'series'}, markPoint:{data:[]} }
+    ]
+  };
+
+  chart.setOption(option);
+
+  try{
+    const all = await fetchRows();
+    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    let idx = 0;
+
+    function applyProgress() {
+      progressive.length = 0;
+      for (let i = 0; i <= idx; i++) progressive.push(all[i]);
+      chart.setOption({ dataset: [{ id: 'progress', source: progressive }] });
+    }
+
+    // Primer render
+    applyProgress();
+
+    // Avanza año a año cada 2s
+    const timer = setInterval(() => {
+      idx++;
+      if (idx >= all.length - 1) {
+        clearInterval(timer);
+        placePeakMarkers(all); // al terminar, colocamos picos
+      } else {
+        applyProgress();
+      }
+    }, 2000);
+
+    if (all.length === 1) placePeakMarkers(all);
+
+    // Picos con mensajes personalizables
+    function placePeakMarkers(rows){
+      const maxOf = (key) => {
+        let best = null;
+        rows.forEach(r => {
+          const v = +r[key];
+          if (isFinite(v)) if (!best || v > best.val) best = { anio: r.anio, val: v };
+        });
+        return best;
+      };
+
+      const peakUrbano = maxOf('urbano');
+      const peakRural  = maxOf('rural');
+      const peakTotal  = maxOf('total');
+
+      const urbanoMsg = peakMessages.urbano[peakUrbano?.anio] || (peakUrbano ? `Pico: ${peakUrbano.val.toFixed(2)}% (${peakUrbano.anio})` : '');
+      const ruralMsg  = peakMessages.rural [peakRural ?.anio] || (peakRural  ? `Pico: ${peakRural.val.toFixed(2)}% (${peakRural .anio})` : '');
+      const totalMsg  = peakMessages.total [peakTotal ?.anio] || (peakTotal  ? `Pico: ${peakTotal.val.toFixed(2)}% (${peakTotal .anio})` : '');
+
+      const seriesUpdate = [
+        { // Urbano
+          markPoint: {
+            symbolSize: 55,
+            label:{color:'#111',backgroundColor:'#fff',padding:6,borderRadius:6,shadowBlur:6,shadowColor:'rgba(0,0,0,.12)'},
+            data: peakUrbano ? [{ coord:[peakUrbano.anio, peakUrbano.val], value:peakUrbano.val, label:{ formatter: urbanoMsg } }] : []
+          }
+        },
+        { // Rural
+          markPoint: {
+            symbolSize: 55,
+            label:{color:'#111',backgroundColor:'#fff',padding:6,borderRadius:6,shadowBlur:6,shadowColor:'rgba(0,0,0,.12)'},
+            data: peakRural ? [{ coord:[peakRural.anio, peakRural.val], value:peakRural.val, label:{ formatter: ruralMsg } }] : []
+          }
+        },
+        { // Total
+          markPoint: {
+            symbolSize: 55,
+            label:{color:'#111',backgroundColor:'#fff',padding:6,borderRadius:6,shadowBlur:6,shadowColor:'rgba(0,0,0,.12)'},
+            data: peakTotal ? [{ coord:[peakTotal.anio, peakTotal.val], value:peakTotal.val, label:{ formatter: totalMsg } }] : []
+          }
+        }
+      ];
+
+      chart.setOption({ series: [
+        { ...option.series[0], ...seriesUpdate[0] },
+        { ...option.series[1], ...seriesUpdate[1] },
+        { ...option.series[2], ...seriesUpdate[2] }
+      ]}, { replaceMerge: ['series'] });
+    }
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
