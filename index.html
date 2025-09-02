@@ -1,49 +1,56 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>📊 Mi Biblioteca de Gráficos</title>
-<meta name="color-scheme" content="dark light" />
 <style>
   :root{
-    /* Tema oscuro por defecto */
+    /* escala inicial de la vista previa */
+    --pv-scale:.37;
+  }
+
+  /* ===== THEME TOKENS ===== */
+  html[data-theme="dark"]{
     color-scheme: dark;
     --bg: #0b0f14;
-    --bg-accent: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.10), transparent 50%),
-                 radial-gradient(900px 500px at 120% 0%, rgba(16,185,129,.10), transparent 60%),
-                 linear-gradient(180deg, #0b0f14, #090d12 60%);
-    --panel: #0f1520;
-    --card: #111827;
-    --muted: #9aa3b2;
-    --fg: #e5e7eb;
-    --brand: #60a5fa;
-    --brand-2: #34d399;
-    --ring: 0 0 0 3px rgba(96,165,250,.35);
-    --shadow: 0 14px 40px rgba(0,0,0,.45);
-    --border: rgba(255,255,255,.08);
-    --pv-scale: .37; /* escala inicial de vista previa */
+    --bg-accent:
+      radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.10), transparent 50%),
+      radial-gradient(900px 500px at 120% 0%, rgba(16,185,129,.10), transparent 60%),
+      linear-gradient(180deg, #0b0f14, #090d12 60%);
+    --panel:#0f1520;
+    --card:#111827;
+    --muted:#9aa3b2;
+    --fg:#e5e7eb;
+    --brand:#60a5fa;
+    --brand-2:#34d399;
+    --ring:0 0 0 3px rgba(96,165,250,.35);
+    --shadow:0 14px 40px rgba(0,0,0,.45);
+    --border:rgba(255,255,255,.10);
+    --btn:#1f2937;
   }
-  @media (prefers-color-scheme: light){
-    :root{
-      --bg: #f5f7fa;
-      --bg-accent: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.12), transparent 50%),
-                   radial-gradient(900px 500px at 120% 0%, rgba(16,185,129,.12), transparent 60%),
-                   linear-gradient(180deg, #f5f7fa, #f1f5f9 60%);
-      --panel:#ffffff;
-      --card:#ffffff;
-      --muted:#6b7280;
-      --fg:#111827;
-      --brand:#2563eb;
-      --brand-2:#059669;
-      --shadow: 0 14px 30px rgba(0,0,0,.12);
-      --border: rgba(17,24,39,.1);
-    }
+  html[data-theme="light"]{
+    color-scheme: light;
+    --bg:#f5f7fa;
+    --bg-accent:
+      radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.12), transparent 50%),
+      radial-gradient(900px 500px at 120% 0%, rgba(16,185,129,.12), transparent 60%),
+      linear-gradient(180deg, #f5f7fa, #f1f5f9 60%);
+    --panel:#ffffff;
+    --card:#ffffff;
+    --muted:#6b7280;
+    --fg:#111827;
+    --brand:#2563eb;
+    --brand-2:#059669;
+    --ring:0 0 0 3px rgba(37,99,235,.35);
+    --shadow:0 14px 30px rgba(0,0,0,.12);
+    --border:rgba(17,24,39,.12);
+    --btn:#f3f4f6;
   }
 
   html,body{height:100%}
   body{
-    margin:0; background: var(--bg-accent); color:var(--fg);
+    margin:0; background:var(--bg-accent); color:var(--fg);
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
     line-height:1.45;
   }
@@ -75,21 +82,16 @@
   .search input:focus{ box-shadow: var(--ring); border-color: transparent; }
   .search .icon{ position:absolute; left:10px; top:50%; transform: translateY(-50%); opacity:.7; pointer-events:none; }
 
-  .btn, .segmented button{
+  .btn{
     padding:10px 12px; border-radius:12px; border:1px solid var(--border);
-    background:var(--panel); color:var(--fg); cursor:pointer; transition:.15s;
+    background:var(--btn); color:var(--fg); cursor:pointer; transition:.15s;
   }
-  .btn:hover, .segmented button:hover{ filter: brightness(1.06); }
-  .segmented{ display:flex; border:1px solid var(--border); border-radius:12px; overflow:hidden; }
-  .segmented button{ border:0; }
-  .segmented button[aria-pressed="true"]{ background: linear-gradient(135deg, var(--brand), var(--brand-2)); color:#fff; }
+  .btn:hover{ filter: brightness(1.06); }
 
   .grid{
     display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap:16px; margin-top:18px;
   }
-  .list{ display:flex; flex-direction:column; gap:12px; margin-top:18px; }
-
   .card{
     position:relative; border:1px solid var(--border);
     background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
@@ -115,23 +117,23 @@
     width:40px; height:40px; display:grid; place-items:center; cursor:pointer;
   }
 
-  /* PREVIEW */
+  /* ===== PREVIEW ===== */
   .preview{
     position:fixed; width:520px; height:360px; display:none; z-index:60;
     border:1px solid var(--border); background:var(--card); border-radius:16px; box-shadow: var(--shadow); overflow:hidden;
   }
-  .preview.floating{ inset:auto auto 0 0; } /* se posiciona por JS */
+  .preview.floating{ inset:auto auto 0 0; }  /* JS posiciona left/top */
   .preview.docked{ right:18px; top:90px; display:block; }
   .preview header{
     display:flex; align-items:center; justify-content:space-between; gap:8px;
     padding:8px 10px; border-bottom:1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,.04), transparent);
   }
   .frame-wrap{ position:relative; width:100%; height:100%; background:var(--panel); }
-  iframe{
+  .preview iframe{
     position:absolute; inset:auto auto 0 0;
     width:1200px; height:800px; transform-origin: bottom left;
     transform: scale(var(--pv-scale)); border:0; background:white;
-    pointer-events: none; /* seguro por defecto */
+    pointer-events: none; /* la interacción se puede activar con botón */
   }
   .preview.interactive iframe{ pointer-events:auto; }
   .fallback{
@@ -144,7 +146,6 @@
   /* Oculta la lista original */
   #links{ display:none; }
 
-  /* Toast */
   .toast{
     position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
     background:var(--panel); border:1px solid var(--border); color:var(--fg);
@@ -167,17 +168,7 @@
           <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 21l-4.3-4.3m1.8-4.2a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z"/></svg>
           <input id="q" type="search" placeholder="Buscar por título, archivo o etiqueta…" aria-label="Buscar" />
         </div>
-        <div class="segmented" role="group" aria-label="Vista">
-          <button id="btnGrid" aria-pressed="true" title="Vista en tarjetas">⬚</button>
-          <button id="btnList" aria-pressed="false" title="Vista en lista">☰</button>
-        </div>
-        <select id="sort" class="btn" title="Ordenar">
-          <option value="name-asc">Nombre (A–Z)</option>
-          <option value="name-desc">Nombre (Z–A)</option>
-          <option value="file-asc">Archivo (A–Z)</option>
-          <option value="file-desc">Archivo (Z–A)</option>
-        </select>
-        <button class="btn" id="toggleTheme" title="Claro/Oscuro">🌓</button>
+        <button class="btn" id="toggleTheme" title="Claro/Oscuro">🌙</button>
       </div>
     </header>
 
@@ -204,7 +195,7 @@
       </div>
     </div>
 
-    <!-- Lista original (puedes añadir data-desc y data-tags) -->
+    <!-- Tu lista: añade data-desc y data-tags si quieres -->
     <ul id="links">
       <li><a href="burbujas-3.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo" data-tags="burbujas, timeline">burbujas-3</a></li>
       <li><a href="series-deficithab-nacional.html" target="_blank" data-desc="Serie del déficit habitacional nacional (%)" data-tags="series, déficit, nacional">series deficit nacional%</a></li>
@@ -224,57 +215,38 @@
   const container = $('#container');
   const preview = $('#preview'), pvFrame = $('#pvFrame'), pvFile = $('#pvFile'), pvFallback = $('#pvFallback');
   const pvScale = $('#pvScale'), pvDock = $('#pvDock'), pvClose = $('#pvClose'), pvInteract = $('#pvInteract');
-  const q = $('#q'), sortSel = $('#sort'), btnGrid=$('#btnGrid'), btnList=$('#btnList');
+  const q = $('#q'), toggleThemeBtn = $('#toggleTheme');
   const toastEl = $('#toast');
 
-  // Tema: toggle claro/oscuro (persistente)
+  /* ===== THEME ===== */
   (function themeInit(){
-    const saved = localStorage.getItem('theme');
-    if(saved) document.documentElement.style.colorScheme = saved;
-    $('#toggleTheme').addEventListener('click', ()=>{
-      const current = getComputedStyle(document.documentElement).colorScheme;
-      const next = current==='dark' ? 'light' : 'dark';
-      document.documentElement.style.colorScheme = next;
-      localStorage.setItem('theme', next);
-      ping('Tema: '+ (next==='dark'?'oscuro':'claro'));
+    const KEY='ui-theme';
+    const saved = localStorage.getItem(KEY);
+    if(saved){ document.documentElement.setAttribute('data-theme', saved); }
+    toggleThemeBtn.textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '🌙' : '☀️';
+    toggleThemeBtn.addEventListener('click', ()=>{
+      const curr = document.documentElement.getAttribute('data-theme');
+      const next = curr==='dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem(KEY, next);
+      toggleThemeBtn.textContent = next==='dark' ? '🌙' : '☀️';
+      ping('Tema: '+(next==='dark'?'oscuro':'claro'));
     });
   })();
 
-  // Construye modelo desde lista original
+  /* ===== DATA FROM <ul> ===== */
   const items = $$('#links a').map(a => ({
     href: a.getAttribute('href'),
     text: (a.textContent||'').trim(),
     desc: a.dataset.desc || '',
-    tags: (a.dataset.tags || inferTags(a.textContent||'')).split(',').map(s=>s.trim()).filter(Boolean)
+    tags: (a.dataset.tags || '').split(',').map(s=>s.trim()).filter(Boolean)
   }));
 
-  function inferTags(name){
-    // Etiquetas sugeridas desde el nombre del archivo
-    const t = [];
-    const s = name.toLowerCase();
-    if(/burbuja|bubble/.test(s)) t.push('burbujas');
-    if(/serie|series|timeline/.test(s)) t.push('series');
-    if(/deficit|deficithab/.test(s)) t.push('déficit');
-    if(/enaho/.test(s)) t.push('enaho');
-    if(/nacional/.test(s)) t.push('nacional');
-    return t.join(', ');
-  }
-
-  function extIcon(){
-    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6zm1 7h5l-6-6v5a1 1 0 0 0 1 1z"/></svg>`;
-  }
-  function linkIcon(){
-    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10.59 13.41a1.98 1.98 0 010-2.82l2.59-2.59a2 2 0 112.83 2.83l-1.42 1.41"/><path d="M13.41 10.59a1.98 1.98 0 010 2.82l-2.59 2.59a2 2 0 11-2.83-2.83l1.42-1.41"/></svg>`;
-  }
-  function eyeIcon(){
-    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>`;
-  }
-  function copyIcon(){
-    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 00-2 2v12h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>`;
-  }
-  function codeIcon(){
-    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 17l-5-5 5-5M16 7l5 5-5 5M13 6l-2 12"/></svg>`;
-  }
+  function extIcon(){ return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6zm1 7h5l-6-6v5a1 1 0 0 0 1 1z"/></svg>`; }
+  function linkIcon(){ return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10.59 13.41a1.98 1.98 0 010-2.82l2.59-2.59a2 2 0 112.83 2.83l-1.42 1.41"/><path d="M13.41 10.59a1.98 1.98 0 010 2.82l-2.59 2.59a2 2 0 11-2.83-2.83l1.42-1.41"/></svg>`; }
+  function eyeIcon(){ return `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/></svg>`; }
+  function copyIcon(){ return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 00-2 2v12h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>`; }
+  function codeIcon(){ return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 17l-5-5 5-5M16 7l5 5-5 5M13 6l-2 12"/></svg>`; }
 
   function makeCard(it, idx){
     const el = document.createElement('article');
@@ -294,16 +266,15 @@
       </div>
     `;
 
-    // Hover preview
+    // ===== PREVIEW SHOW/HIDE (no desaparecer al ir a los controles) =====
     let hideTimer, showTimer;
     const show = (evt, sticky=false)=>{
-      clearTimeout(hideTimer);
-      clearTimeout(showTimer);
+      clearTimeout(hideTimer); clearTimeout(showTimer);
       showTimer = setTimeout(()=>{
         preview.classList.remove('error');
         pvFallback.textContent = 'Cargando vista previa…';
         pvFile.textContent = it.href;
-        pvFrame.removeAttribute('src'); // reinicia
+        pvFrame.removeAttribute('src');
         pvFrame.src = it.href;
         if(!preview.classList.contains('docked')){
           preview.style.display='block';
@@ -312,37 +283,43 @@
         }
         preview.setAttribute('aria-hidden','false');
         preview.dataset.sticky = sticky ? '1' : '';
-      }, 120);
+      }, 100);
     };
-    const hide = ()=>{
+    const scheduleHide = ()=>{
       if(preview.dataset.sticky==='1' || preview.classList.contains('docked')) return;
       hideTimer = setTimeout(()=>{
-        preview.style.display='none';
-        preview.setAttribute('aria-hidden','true');
-        pvFrame.removeAttribute('src');
-      }, 120);
+        // si el mouse está sobre el preview, no ocultar
+        if(preview.matches(':hover')) return;
+        hideNow();
+      }, 160);
+    };
+    const hideNow = ()=>{
+      preview.style.display='none';
+      preview.setAttribute('aria-hidden','true');
+      preview.classList.remove('interactive');
+      pvFrame.removeAttribute('src');
     };
 
     el.addEventListener('mouseenter', e=> show(e));
     el.addEventListener('mousemove', e=> positionPreview(e));
-    el.addEventListener('mouseleave', hide);
+    el.addEventListener('mouseleave', scheduleHide);
+
+    // Mantener visible si el cursor entra al preview
+    preview.addEventListener('mouseenter', ()=> clearTimeout(hideTimer));
+    preview.addEventListener('mouseleave', scheduleHide);
+
     el.querySelector('.peek').addEventListener('click', (e)=>{ e.stopPropagation(); toggleSticky(it, e); });
     el.querySelector('.copy').addEventListener('click', ()=> copyLink(it.href));
     el.querySelector('.embed').addEventListener('click', ()=> copyEmbed(it.href));
-    el.addEventListener('keydown', (e)=>{
-      if(e.key==='Enter'){ window.open(it.href, '_blank', 'noopener'); }
-      if(e.key.toLowerCase()==='p'){ toggleSticky(it, e); }
-    });
+    el.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ window.open(it.href, '_blank', 'noopener'); } });
     return el;
   }
 
-  function render(list, mode='grid'){
-    container.className = mode==='grid' ? 'grid' : 'list';
+  function render(list){
     container.innerHTML = '';
     list.forEach((it,i)=> container.appendChild(makeCard(it, i)));
   }
 
-  // Posiciona preview flotante
   function positionPreview(evt){
     const pad=16, w=520, h=360;
     let x = evt.clientX + 18, y = evt.clientY + 18;
@@ -364,17 +341,13 @@
     }else{
       preview.style.display='block';
       preview.dataset.sticky='1';
-      if(!preview.classList.contains('docked')){
-        positionPreview(e);
-      }
-      if(pvFrame.src !== new URL(it.href, location.href).toString()){
-        pvFrame.src = it.href;
-      }
+      if(!preview.classList.contains('docked')) positionPreview(e);
+      if(pvFrame.src !== new URL(it.href, location.href).toString()) pvFrame.src = it.href;
       pvFile.textContent = it.href;
     }
   }
 
-  // Preview controls
+  /* ===== PREVIEW CONTROLS ===== */
   pvClose.addEventListener('click', ()=>{
     preview.dataset.sticky=''; preview.classList.remove('docked','interactive');
     preview.style.display='none'; pvFrame.removeAttribute('src');
@@ -397,7 +370,6 @@
   });
   pvFrame.addEventListener('error', ()=> preview.classList.add('error'));
   pvFrame.addEventListener('load', ()=>{
-    // Si hay restricción CORS o contenido vacío, marcamos error
     try{
       const ok = pvFrame.contentDocument && pvFrame.contentDocument.body && pvFrame.contentDocument.body.innerHTML.trim()!=='';
       preview.classList.toggle('error', !ok);
@@ -408,29 +380,16 @@
     }
   });
 
-  // Buscar / filtrar / ordenar
+  /* ===== BUSCAR ===== */
   function applyFilter(){
     const term = q.value.trim().toLowerCase();
-    const sorted = sortItems(items.slice(), sortSel.value);
     const filtered = term
-      ? sorted.filter(it => (it.text+' '+it.href+' '+it.desc+' '+it.tags.join(' ')).toLowerCase().includes(term))
-      : sorted;
-    render(filtered, viewMode);
-  }
-  function sortItems(arr, mode){
-    const dir = mode.endsWith('desc') ? -1 : 1;
-    const key = mode.startsWith('file') ? (it)=> it.href.toLowerCase() : (it)=> it.text.toLowerCase();
-    return arr.sort((a,b)=> key(a) > key(b) ? dir : key(a) < key(b) ? -dir : 0);
+      ? items.filter(it => (it.text+' '+it.href+' '+it.desc+' '+it.tags.join(' ')).toLowerCase().includes(term))
+      : items;
+    render(filtered);
   }
   q.addEventListener('input', applyFilter);
-  sortSel.addEventListener('change', applyFilter);
 
-  // Vista grid/lista
-  let viewMode = 'grid';
-  btnGrid.addEventListener('click', ()=> { viewMode='grid'; btnGrid.setAttribute('aria-pressed','true'); btnList.setAttribute('aria-pressed','false'); render(sortItems(items.slice(), sortSel.value), viewMode); });
-  btnList.addEventListener('click', ()=> { viewMode='list'; btnGrid.setAttribute('aria-pressed','false'); btnList.setAttribute('aria-pressed','true'); render(sortItems(items.slice(), sortSel.value), viewMode); });
-
-  // Copiar utilidades
   async function copyLink(href){
     try{
       await navigator.clipboard.writeText(new URL(href, location.href).toString());
@@ -450,44 +409,8 @@
     clearTimeout(toastEl._t); toastEl._t = setTimeout(()=> toastEl.style.display='none', 1300);
   }
 
-  // Navegación por teclado global
-  document.addEventListener('keydown', (e)=>{
-    const key = e.key.toLowerCase();
-    const cards = $$('.card');
-    const active = document.activeElement.closest?.('.card');
-    let idx = active ? Number(active.dataset.index) : -1;
-    if(key==='j'){ // siguiente
-      e.preventDefault();
-      idx = Math.min((idx+1), cards.length-1);
-      if(idx>=0) cards[idx].focus({preventScroll:false});
-    }
-    if(key==='k'){ // anterior
-      e.preventDefault();
-      idx = Math.max((idx-1), 0);
-      cards[idx].focus({preventScroll:false});
-    }
-    if(key==='p'){ // toggle preview
-      e.preventDefault();
-      if(idx>=0){
-        const it = items[idx];
-        toggleSticky(it, e);
-      }
-    }
-    if(key==='g'){ // grid/lista
-      e.preventDefault();
-      (viewMode==='grid'?btnList:btnGrid).click();
-    }
-    if(key==='d'){ // anclar/desanclar
-      e.preventDefault();
-      pvDock.click();
-    }
-    if(e.key==='Escape'){
-      pvClose.click();
-    }
-  });
-
-  // Render inicial
-  applyFilter();
+  /* Render inicial */
+  render(items);
 </script>
 </body>
 </html>
