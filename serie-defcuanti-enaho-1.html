@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Déficit Habitacional (%) Total - Urbano - Rural</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Déficit Habitacional (%) Total - Urbano - Rural</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  // === 1) CONFIGURA TU SERVICIO =============================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 46 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+
+  // Eje X fijo (estático)
+  const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
+
+  // 🎨 COLORES (MODIFICA AQUÍ)
+  // --------------------------------------------------------------------------
+  const COLORS = {
+    total : "#0ea5e9",  // azul
+    urbano: "#22c55e",  // verde
+    rural : "#ef4444"   // rojo
+  };
+  // --------------------------------------------------------------------------
+
+  // === 2) UTILIDADES =========================================================
+  const $err = document.getElementById('err');
+  function qs(url, params){
+    return url + "?" + new URLSearchParams(params).toString();
+  }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        total:  r.porcentaje_total  == null ? null : +Number(r.porcentaje_total ).toFixed(2),
+        urbano: r.porcentaje_urbano == null ? null : +Number(r.porcentaje_urbano).toFixed(2),
+        rural:  r.porcentaje_rural  == null ? null : +Number(r.porcentaje_rural ).toFixed(2),
+      }));
+  }
+
+  // === 3) INICIA EL CHART ====================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  // Índice por año para tooltip
+  const byYear = Object.create(null);
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    color: [COLORS.total, COLORS.urbano, COLORS.rural],
+    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    legend: {
+      top: 8, left: 'center',
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 },
+      data: ['Total (%)','Urbano (%)','Rural (%)']
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: function (params) {
+        const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
+        const row = byYear[year];
+        const cfg = [
+          { name: 'Total (%)',  key: 'total'  },
+          { name: 'Urbano (%)', key: 'urbano' },
+          { name: 'Rural (%)',  key: 'rural'  }
+        ];
+        const markers = {};
+        (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const dotGray = '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
+        const lines = [`<b>${year}</b>`];
+        cfg.forEach(c => {
+          const val = row && isFinite(row[c.key]) ? row[c.key].toFixed(2) + '%' : '—';
+          const mar
