@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Déficit Habitacional (%) Total - Urbano - Rural</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Déficit Habitacional (%) Total - Urbano - Rural</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  // === 1) CONFIGURA TU SERVICIO =============================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 45 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+
+  // Eje X fijo (estático)
+  const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
+
+  // Mensajes opcionales por pico (edítalos si quieres personalizar)
+  const peakMessages = { total:{}, urbano:{}, rural:{} };
+
+  // === 2) UTILIDADES =========================================================
+  const $err = document.getElementById('err');
+  function qs(url, params){
+    return url + "?" + new URLSearchParams(params).toString();
+  }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        total:  +Number(r.porcentaje_total ?? 0).toFixed(2),
+        urbano: +Number(r.porcentaje_urbano ?? 0).toFixed(2),
+        rural:  +Number(r.porcentaje_rural  ?? 0).toFixed(2),
+      }));
+  }
+
+  // === 3) INICIA EL CHART ====================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  const progressive = []; // se irá llenando con los datos ya conocidos
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    legend: {
+      top: 8, left: 'center',
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 },
+      data: ['Total (%)','Urbano (%)','Rural (%)']
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: function (params) {
+        const year = params[0]?.axisValueLabel || '';
+        const map = Object.fromEntries(params.map(p => [p.seriesName, p]));
+        const names = ['Total (%)','Urbano (%)','Rural (%)'];
+        const lines = [`<b>${year}</b>`];
+        names.forEach(n=>{
+          const p = map[n];
+          const val = p && p.value!=null && !isNaN(p.value) ? (+p.value).toFixed(2)+'%' : '—';
+          const marker = p ? p.marker : '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
+          lines.push(`${marker} ${n}: <b>${val}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    dataset: [{ id: 'progress', source: progressive }],
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: YEARS,               // EJE X FIJO
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 28,
+      axisTick: { alignWithLabel: true },
+      animation: false           // evita animación del eje
+    },
+    yAxis: {
+      type: 'value',
+      name: '%',
+      nameTextStyle: { padding: [0,0,0,-4] },
+      axisLabel: { formatter: '{value}%' },
+      splitLine: { show: true }
+    },
+    animation: true,
+    animationDuration: 800,
+    animationEasing: 'linear',
+    series: [
+      { name:'Total (%)',  type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'total'},  emphasis:{focus:'series'}, markPoint:{data:[]} },
+      { name:'Urbano (%)', type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'urbano'}, emphasis:{focus:'series'}, markPoint:{data:[]} },
+      { name:'Rural (%)',  type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'rural'},  emphasis:{focus:'series'}, markPoint:{data:[]} }
+    ]
+  };
+
+  chart.setOption(baseOption);
+
+  // === 4) CARGA, ANIMA AÑO A AÑO (1s), Y COLOCA PICOS SIN SUPERPOSICIÓN =====
+  try{
+    const all = await fetchRows();
+    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    let idx = 0;
+
+    function applyProgress() {
+      progressive.length = 0;
+      for (let i = 0; i <= idx; i++) progressive.push(all[i]);
+      chart.setOption({ dataset: [{ id: 'progress', source: progressive }] });
+    }
+
+    applyProgress();
+
+    // Velocidad: 1 segundo por año
+    const timer = setInterval(() => {
+      idx++;
+      if (idx >= all.length - 1) {
+        clearInterval(timer);
+        placePeakMarkers(all);
+      } else {
+        applyProgress();
+      }
+    }, 1000);
+
+    if (all.length === 1) placePeakMarkers(all);
+
+    function placePeakMarkers(rows){
+      const maxOf = (key) => {
+        let best = null;
+        rows.forEach(r => {
+          const v = +r[key];
+          if (isFinite(v)) {
+            if (!best || v > best.val) best = { anio: r.anio, val: v };
+          }
+        });
+        return best;
+      };
+
+      const peakTotal  = maxOf('total');
+      const peakUrbano = maxOf('urbano');
+      const peakRural  = maxOf('rural');
+
+      const totalMsg  = peakMessages.total [peakTotal?.anio]  || (peakTotal  ? `Pico: ${peakTotal.val.toFixed(2)}% (${peakTotal.anio})`  : '');
+      const urbanoMsg = peakMessages.urbano[peakUrbano?.anio] || (peakUrbano ? `Pico: ${peakUrbano.val.toFixed(2)}% (${peakUrbano.anio})` : '');
+      const ruralMsg  = peakMessages.rural [peakRural?.anio]  || (peakRural  ? `Pico: ${peakRural.val.toFixed(2)}% (${peakRural.anio})`  : '');
+
+      // Offsets para evitar montarse (calculados en píxeles en el eje X)
+      const peaks = [
+        peakTotal  ? { key:'total',  name:'Total (%)',  ...peakTotal,  msg: totalMsg  } : null,
+        peakUrbano ? { key:'urbano', name:'Urbano (%)', ...peakUrbano, msg: urbanoMsg } : null,
+        peakRural  ? { key:'rural',  name:'Rural (%)',  ...peakRural,  msg: ruralMsg  } : null,
+      ].filter(Boolean);
+
+      const px = {};
+      peaks.forEach(p=>{
+        const pt = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [p.anio, p.val]);
+        px[p.key] = { x: (pt && isFinite(pt[0]) ? pt[0] : 0), y: (pt && isFinite(pt[1]) ? pt[1] : 0) };
+      });
+
+      // Agrupa picos cercanos en X y reparte offsets verticales
+      const keys = peaks.map(p=>p.key);
+      const used = new Set();
+      const offsets = {}; // { key: [dx, dy] }
+      const X_NEAR = 60;  // umbral de cercanía horizontal (px)
+
+      for (let i=0; i<keys.length; i++){
+        const ki = keys[i];
+        if (used.has(ki)) continue;
+        const group = [ki];
+        for (let j=i+1; j<keys.length; j++){
+          const kj = keys[j];
+          if (used.has(kj)) continue;
+          if (Math.abs(px[ki].x - px[kj].x) < X_NEAR) group.push(kj);
+        }
+        group.forEach(k=>used.add(k));
+        // Asigna offsets simétricos por tamaño del grupo
+        if (group.length === 1) {
+          offsets[group[0]] = [0, 0];
+        } else if (group.length === 2) {
+          offsets[group[0]] = [0, -20];
+          offsets[group[1]] = [0,  20];
+        } else {
+          // 3 elementos
+          // Ordena por valor para espaciar visualmente
+          const ordered = group.slice().sort((a,b)=>{
+            const va = peaks.find(p=>p.key===a).val;
+            const vb = peaks.find(p=>p.key===b).val;
+            return vb - va; // desc
+          });
+          offsets[ordered[0]] = [0, -28];
+          offsets[ordered[1]] = [0,   0];
+          offsets[ordered[2]] = [0,  28];
+        }
+      }
+
+      const labelBase = {
+        show: true,
+        color:'#111',
+        backgroundColor:'#fff',
+        padding:6,
+        borderRadius:6,
+        shadowBlur:6,
+        shadowColor:'rgba(0,0,0,.12)'
+      };
+
+      const mpTotal  = peakTotal  ? [{ coord:[peakTotal.anio,  peakTotal.val],  value:peakTotal.val,  label:{ ...labelBase, formatter: totalMsg,  offset: offsets.total  || [0,0] } }] : [];
+      const mpUrbano = peakUrbano ? [{ coord:[peakUrbano.anio, peakUrbano.val], value:peakUrbano.val, label:{ ...labelBase, formatter: urbanoMsg, offset: offsets.urbano || [0,0] } }] : [];
+      const mpRural  = peakRural  ? [{ coord:[peakRural.anio,  peakRural.val],  value:peakRural.val,  label:{ ...labelBase, formatter: ruralMsg,  offset: offsets.rural  || [0,0] } }] : [];
+
+      // MarkPoint SIN marcador (solo etiqueta)
+      chart.setOption({
+        series: [
+          { ...baseOption.series[0], markPoint:{ symbolSize:0, data: mpTotal  } },
+          { ...baseOption.series[1], markPoint:{ symbolSize:0, data: mpUrbano } },
+          { ...baseOption.series[2], markPoint:{ symbolSize:0, data: mpRural  } }
+        ]
+      }, { replaceMerge: ['series'] });
+    }
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
