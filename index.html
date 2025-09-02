@@ -3,54 +3,417 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lista de Graficos</title>
+  <title>📊 Mi Biblioteca de Gráficos</title>
+  <meta name="color-scheme" content="light dark" />
   <style>
-    body {
-      font-family: system-ui, Arial, sans-serif;
-      background: #f5f7fa;
-      margin: 0;
-      padding: 2rem;
+    :root{
+      --bg:#0b0f14;
+      --panel:#0f1520;
+      --card:#111827;
+      --muted:#9aa3b2;
+      --fg:#e5e7eb;
+      --brand:#60a5fa;
+      --brand-2:#34d399;
+      --ring: 0 0 0 3px rgba(96,165,250,.35);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --border: rgba(255,255,255,.08);
     }
-    h1 {
-      text-align: center;
-      color: #333;
+    @media (prefers-color-scheme: light){
+      :root{
+        --bg:#f5f7fa;
+        --panel:#ffffff;
+        --card:#ffffff;
+        --muted:#6b7280;
+        --fg:#111827;
+        --brand:#2563eb;
+        --brand-2:#059669;
+        --shadow: 0 10px 25px rgba(0,0,0,.08);
+        --border: rgba(17,24,39,.08);
+      }
     }
-    ul {
-      list-style: none;
-      padding: 0;
-      max-width: 400px;
-      margin: 2rem auto;
+
+    html,body{height:100%}
+    body{
+      margin:0;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,.12), transparent 50%),
+                  radial-gradient(800px 500px at 120% 0%, rgba(16,185,129,.12), transparent 60%),
+                  var(--bg);
+      color:var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      line-height:1.45;
     }
-    li {
-      margin: 10px 0;
+    .wrap{
+      max-width:1150px;
+      margin:0 auto;
+      padding:28px 20px 64px;
     }
-    a {
-      display: block;
-      padding: 12px 18px;
-      background: #fff;
-      border-radius: 8px;
-      text-decoration: none;
-      color: #0077cc;
-      font-weight: bold;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      transition: background 0.3s, transform 0.2s;
+    header{
+      display:flex;
+      align-items:center;
+      gap:14px;
+      justify-content:space-between;
+      padding:14px 16px;
+      background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0));
+      border:1px solid var(--border);
+      border-radius:18px;
+      box-shadow: var(--shadow);
+      position: sticky; top:12px; backdrop-filter: blur(10px);
+      z-index:5;
     }
-    a:hover {
-      background: #0077cc;
-      color: #fff;
-      transform: translateY(-2px);
+    .title{
+      display:flex; align-items:center; gap:12px;
     }
+    .title .logo{
+      width:40px;height:40px;border-radius:10px;
+      display:grid;place-items:center;
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      color:white;font-weight:900;letter-spacing:.5px; box-shadow:var(--shadow);
+    }
+    h1{font-size:clamp(18px,2.4vw,24px); margin:0}
+    .muted{color:var(--muted); font-size:12px}
+
+    .tools{
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    }
+    .search{
+      position:relative;
+    }
+    .search input{
+      width:min(56vw,360px);
+      padding:10px 36px 10px 36px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      color:var(--fg);
+      outline:none;
+      box-shadow:none;
+      transition:.2s;
+    }
+    .search input:focus{ box-shadow: var(--ring); border-color: transparent; }
+    .search .icon{
+      position:absolute; left:10px; top:50%; transform:translateY(-50%); opacity:.7;
+      pointer-events:none;
+    }
+    .btn{
+      padding:10px 12px; border-radius:12px; border:1px solid var(--border);
+      background:var(--panel); color:var(--fg); cursor:pointer;
+    }
+    .btn:hover{ filter: brightness(1.05); }
+
+    /* GRID */
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap:16px;
+      margin-top:18px;
+    }
+    .card{
+      position:relative;
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
+      border-radius:16px;
+      padding:14px 14px 12px;
+      box-shadow: var(--shadow);
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+      overflow:hidden;
+    }
+    .card:hover{ transform: translateY(-2px); border-color: rgba(99,102,241,.35);}
+    .card .badge{
+      font-size:11px; color:var(--muted);
+      display:flex; align-items:center; gap:6px; margin-bottom:6px;
+    }
+    .card h3{
+      margin:6px 0 10px; font-size:16px; line-height:1.25; letter-spacing:.2px;
+    }
+    .card .actions{
+      display:flex; justify-content:space-between; align-items:center; gap:10px;
+    }
+    .card a.open{
+      flex:1; text-decoration:none; font-weight:600;
+      color:white; background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      padding:9px 12px; border-radius:12px; display:flex; justify-content:center; align-items:center; gap:8px;
+    }
+    .icon-btn{
+      border:1px solid var(--border); background:var(--panel); border-radius:10px;
+      width:40px; height:40px; display:grid; place-items:center; cursor:pointer;
+    }
+    .icon-btn:hover{ filter:brightness(1.06) }
+
+    /* PREVIEW TOOLTIP */
+    .preview{
+      position:fixed; inset: auto auto 0 0; /* se reposiciona por JS */
+      width:460px; height:300px;
+      border:1px solid var(--border);
+      background:var(--card);
+      border-radius:16px; box-shadow: var(--shadow);
+      overflow:hidden; display:none; z-index:50;
+    }
+    .preview header{
+      position:unset; border:none; border-bottom:1px solid var(--border);
+      border-radius:0; box-shadow:none; background:transparent; padding:8px 12px;
+    }
+    .frame-wrap{
+      position:relative; width:100%; height:100%; overflow:hidden; background:var(--panel);
+    }
+    .preview iframe{
+      position:absolute; inset:auto auto 0 0;
+      width:1200px; height:800px; /* tamaño virtual a escalar */
+      transform: scale(.37); transform-origin: bottom left;
+      pointer-events:none; border:0;
+      background:white;
+    }
+    .fallback{
+      position:absolute; inset:0; display:none;
+      align-items:center; justify-content:center; text-align:center; color:var(--muted); padding:24px;
+      font-size:14px;
+    }
+    .preview.error .fallback{ display:flex; }
+    .preview.error iframe{ display:none; }
+
+    /* FOOTER LIST (hidden) */
+    #links{ display:none; }
+
+    /* Small helpers */
+    .hidden{ display:none !important; }
+    .tag{ font-size:11px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
   </style>
 </head>
 <body>
-  <h1>📊 Mi Biblioteca de Gráficos</h1>
-  <ul>
-    <li><a href="burbujas-3.html" target="_blank">burbujas-3</a></li>
-    <li><a href="series-deficithab-nacional.html" target="_blank">series deficit nacional%</a></li>
-    <li><a href="serie-defhab-4.html" target="_blank">series deficit nacional%4</a></li>
-    <li><a href="serie-defhababs-1.html" target="_blank">series deficit nacional(abs)1</a></li>
-    <li><a href="serie-defcuanti-enaho-1.html" target="_blank">series deficit nacional cuanti 1</a></li>
-    <li><a href="serie-defcuali-enaho-1.html" target="_blank">series deficit nacional cuali 1</a></li>
-  </ul>
+  <div class="wrap">
+    <header>
+      <div class="title">
+        <div class="logo">📊</div>
+        <div>
+          <h1>Mi Biblioteca de Gráficos</h1>
+          <div class="muted">Enlaces a demos y visualizaciones (hover para previsualizar)</div>
+        </div>
+      </div>
+      <div class="tools">
+        <div class="search">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21 21l-4.3-4.3m1.8-4.2a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z"/></svg>
+          <input id="q" type="search" placeholder="Buscar por título o archivo…" aria-label="Buscar" />
+        </div>
+        <button class="btn" id="toggleTheme" title="Cambiar contraste">🌓</button>
+      </div>
+    </header>
+
+    <!-- GRID de tarjetas (se llena desde #links) -->
+    <section class="grid" id="grid"></section>
+
+    <!-- Tooltip de previsualización -->
+    <div class="preview" id="preview" role="tooltip" aria-hidden="true">
+      <header style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="tag" id="pvFile">archivo.html</span>
+          <span class="muted" id="pvHint">Vista previa (solo lectura)</span>
+        </div>
+        <button class="btn" id="pvClose" title="Cerrar">✕</button>
+      </header>
+      <div class="frame-wrap">
+        <iframe id="pvFrame" referrerpolicy="no-referrer"></iframe>
+        <div class="fallback" id="pvFallback">No se pudo cargar la vista previa. Abre el archivo para verlo.</div>
+      </div>
+    </div>
+
+    <!-- Tu lista original: añade data-desc si quieres una breve descripción -->
+    <ul id="links">
+      <li><a href="burbujas-3.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo">burbujas-3</a></li>
+      <li><a href="series-deficithab-nacional.html" target="_blank" data-desc="Serie del déficit habitacional nacional (%)">series deficit nacional%</a></li>
+      <li><a href="serie-defhab-4.html" target="_blank" data-desc="Variación por años, versión 4">series deficit nacional%4</a></li>
+      <li><a href="serie-defhababs-1.html" target="_blank" data-desc="Serie del déficit habitacional (valores absolutos)">series deficit nacional(abs)1</a></li>
+      <li><a href="serie-defcuanti-enaho-1.html" target="_blank" data-desc="Déficit cuantitativo (ENAHO)">series deficit nacional cuanti 1</a></li>
+      <li><a href="serie-defcuali-enaho-1.html" target="_blank" data-desc="Déficit cualitativo (ENAHO)">series deficit nacional cuali 1</a></li>
+    </ul>
+  </div>
+
+  <script>
+    // ========= Utilidades =========
+    const $ = (q, el=document) => el.querySelector(q);
+    const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
+    const grid = $('#grid');
+    const preview = $('#preview');
+    const pvFrame = $('#pvFrame');
+    const pvFile = $('#pvFile');
+    const pvFallback = $('#pvFallback');
+    const pvClose = $('#pvClose');
+    const q = $('#q');
+
+    // Persistencia de tema simple
+    (function themeInit(){
+      const saved = localStorage.getItem('theme');
+      if(saved==='light'){ document.documentElement.style.colorScheme='light'; }
+      if(saved==='dark'){ document.documentElement.style.colorScheme='dark'; }
+      $('#toggleTheme').addEventListener('click', ()=>{
+        const current = getComputedStyle(document.documentElement).colorScheme;
+        const next = current==='dark' ? 'light' : 'dark';
+        document.documentElement.style.colorScheme = next;
+        localStorage.setItem('theme', next);
+      });
+    })();
+
+    // Construcción de tarjetas desde la <ul> original
+    const items = $$('#links a').map(a => ({
+      href: a.getAttribute('href'),
+      text: (a.textContent || '').trim(),
+      desc: a.dataset.desc || ''
+    }));
+
+    function extIcon(){
+      // pequeño ícono genérico
+      return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6zm1 7h5l-6-6v5a1 1 0 0 0 1 1z"/>
+      </svg>`;
+    }
+    function linkIcon(){
+      return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M10.59 13.41a1.98 1.98 0 010-2.82l2.59-2.59a2 2 0 112.83 2.83l-1.42 1.41"/>
+        <path d="M13.41 10.59a1.98 1.98 0 010 2.82l-2.59 2.59a2 2 0 11-2.83-2.83l1.42-1.41"/>
+      </svg>`;
+    }
+    function eyeIcon(){
+      return `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11a4 4 0 110-8 4 4 0 010 8z"/>
+      </svg>`;
+    }
+    function copyIcon(){
+      return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 00-2 2v12h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>`;
+    }
+
+    function makeCard(it){
+      const el = document.createElement('article');
+      el.className = 'card';
+      el.innerHTML = `
+        <div class="badge">${extIcon()} <span>${it.href}</span></div>
+        <h3>${it.text}</h3>
+        <p class="muted" style="min-height:2.2em;">${it.desc}</p>
+        <div class="actions">
+          <a class="open" href="${it.href}" target="_blank" rel="noopener">
+            ${linkIcon()} Abrir
+          </a>
+          <button class="icon-btn peek" title="Vista previa">${eyeIcon()}</button>
+          <button class="icon-btn copy" title="Copiar enlace">${copyIcon()}</button>
+        </div>
+      `;
+      // Eventos de preview (hover/focus) en desktop
+      let previewTimer, hideTimer;
+      const show = (evt, sticky=false) => {
+        clearTimeout(hideTimer);
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(()=>{
+          pvFrame.removeAttribute('src');
+          preview.classList.remove('error');
+          pvFallback.textContent = 'Cargando vista previa…';
+          pvFile.textContent = it.href;
+          pvFrame.src = it.href;
+          preview.style.display = 'block';
+          positionPreview(evt);
+          preview.setAttribute('data-sticky', sticky ? '1' : '');
+          preview.setAttribute('aria-hidden','false');
+        }, 120);
+      };
+      const hide = () => {
+        if(preview.getAttribute('data-sticky')) return; // no ocultar si está fijado
+        hideTimer = setTimeout(()=>{
+          preview.style.display='none';
+          preview.setAttribute('aria-hidden','true');
+          pvFrame.removeAttribute('src');
+        }, 120);
+      };
+
+      el.addEventListener('mouseenter', e => show(e));
+      el.addEventListener('mousemove', e => positionPreview(e));
+      el.addEventListener('mouseleave', hide);
+      // Botón “peek” (fija/desfija el tooltip)
+      el.querySelector('.peek').addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const sticky = !!preview.getAttribute('data-sticky');
+        if(sticky){
+          preview.removeAttribute('data-sticky');
+          preview.style.display='none';
+          pvFrame.removeAttribute('src');
+        }else{
+          show(e, true);
+        }
+      });
+      // Copiar enlace
+      el.querySelector('.copy').addEventListener('click', async ()=>{
+        try{
+          await navigator.clipboard.writeText(new URL(it.href, location.href).toString());
+          toast('Enlace copiado');
+        }catch(_){ toast('No se pudo copiar'); }
+      });
+      return el;
+    }
+
+    // Posiciona el tooltip cerca del cursor, evitando desbordes
+    function positionPreview(evt){
+      const pad = 16;
+      const w = 460, h = 300;
+      let x = evt.clientX + 18;
+      let y = evt.clientY + 18;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if(x + w + pad > vw) x = vw - w - pad;
+      if(y + h + pad > vh) y = vh - h - pad;
+      preview.style.left = x + 'px';
+      preview.style.top  = y + 'px';
+    }
+
+    // Maneja errores de iframe (algunos archivos podrían no permitirse)
+    pvFrame.addEventListener('error', ()=> preview.classList.add('error'));
+    pvFrame.addEventListener('load', ()=>{
+      // Si carga algo “about:blank”, tratamos como error
+      try{
+        const ok = pvFrame.contentWindow && pvFrame.contentDocument && pvFrame.contentDocument.body;
+        if(!ok || pvFrame.contentDocument.body.innerHTML.trim()==='') preview.classList.add('error');
+        else preview.classList.remove('error');
+      }catch(_){
+        // Si hay restricción de acceso, marcamos error
+        preview.classList.add('error');
+        pvFallback.textContent = 'Este archivo no permite vista previa embebida.';
+      }
+    });
+    pvClose.addEventListener('click', ()=>{
+      preview.removeAttribute('data-sticky');
+      preview.style.display='none';
+      pvFrame.removeAttribute('src');
+    });
+
+    // Render inicial
+    function render(list){
+      grid.innerHTML = '';
+      list.forEach(it => grid.appendChild(makeCard(it)));
+    }
+    render(items);
+
+    // Búsqueda
+    q.addEventListener('input', ()=>{
+      const term = q.value.trim().toLowerCase();
+      const filtered = term
+        ? items.filter(it => (it.text + ' ' + it.href + ' ' + it.desc).toLowerCase().includes(term))
+        : items;
+      render(filtered);
+    });
+
+    // Toast mínimo
+    let toastEl;
+    function toast(msg){
+      toastEl ||= (()=> {
+        const t = document.createElement('div');
+        t.style.position='fixed'; t.style.bottom='20px'; t.style.left='50%'; t.style.transform='translateX(-50%)';
+        t.style.background='var(--panel)'; t.style.border='1px solid var(--border)'; t.style.color='var(--fg)';
+        t.style.padding='10px 14px'; t.style.borderRadius='10px'; t.style.boxShadow='var(--shadow)';
+        t.style.zIndex='80'; t.style.fontSize='13px'; document.body.appendChild(t); return t;
+      })();
+      toastEl.textContent = msg; toastEl.style.opacity='1'; toastEl.style.display='block';
+      clearTimeout(toastEl._t); toastEl._t = setTimeout(()=> toastEl.style.display='none', 1400);
+    }
+
+    // Accesibilidad: cerrar preview con Esc
+    document.addEventListener('keydown', (e)=>{
+      if(e.key==='Escape'){
+        preview.removeAttribute('data-sticky'); preview.style.display='none'; pvFrame.removeAttribute('src');
+      }
+    });
+  </script>
 </body>
 </html>
