@@ -38,8 +38,15 @@
   // Eje X fijo (estático)
   const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
 
-  // Mensajes opcionales por pico (edítalos si quieres personalizar)
-  const peakMessages = { total:{}, urbano:{}, rural:{} };
+  // 🎨 COLORES (MODIFICA AQUÍ)
+  // --------------------------------------------------------------------------
+  // Cambia estos hex según tu paleta institucional:
+  const COLORS = {
+    total : "#0ea5e9",  // azul
+    urbano: "#22c55e",  // verde
+    rural : "#ef4444"   // rojo
+  };
+  // --------------------------------------------------------------------------
 
   // === 2) UTILIDADES =========================================================
   const $err = document.getElementById('err');
@@ -75,11 +82,9 @@
   const chart = echarts.init(document.getElementById('chart'));
   window.addEventListener('resize', () => chart.resize());
 
-  const progressive = [];     // datos visibles hasta el año actual
-  const byYear = Object.create(null); // índice por año para tooltip
-
   const baseOption = {
     backgroundColor: '#ffffff',
+    color: [COLORS.total, COLORS.urbano, COLORS.rural], // usa tu paleta
     grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
     legend: {
       top: 8, left: 'center',
@@ -92,17 +97,15 @@
       axisPointer: { type: 'line' },
       formatter: function (params) {
         const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
-        const row = byYear[year]; // <- siempre buscamos por año
+        const row = byYear[year];
         const cfg = [
           { name: 'Total (%)',  key: 'total'  },
           { name: 'Urbano (%)', key: 'urbano' },
           { name: 'Rural (%)',  key: 'rural'  }
         ];
-        // marcadores por serie presentes; para ausentes usamos un marcador gris
         const markers = {};
         (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
         const dotGray = '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
-
         const lines = [`<b>${year}</b>`];
         cfg.forEach(c => {
           const val = row && isFinite(row[c.key]) ? row[c.key].toFixed(2) + '%' : '—';
@@ -112,7 +115,6 @@
         return lines.join('<br/>');
       }
     },
-    dataset: [{ id: 'progress', source: progressive }],
     xAxis: {
       type: 'category',
       boundaryGap: false,
@@ -131,137 +133,62 @@
       splitLine: { show: true }
     },
     animation: true,
-    animationDuration: 800,
+    animationDuration: 1400,       // animación continua de trazo
     animationEasing: 'linear',
+    animationDurationUpdate: 600,
     series: [
-      { name:'Total (%)',  type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'total'},  emphasis:{focus:'series'}, markPoint:{data:[]} },
-      { name:'Urbano (%)', type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'urbano'}, emphasis:{focus:'series'}, markPoint:{data:[]} },
-      { name:'Rural (%)',  type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6, datasetId:'progress', encode:{x:'anio',y:'rural'},  emphasis:{focus:'series'}, markPoint:{data:[]} }
+      {
+        name:'Total (%)',
+        type:'line',
+        smooth:true,
+        showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color: COLORS.total },
+        itemStyle:{ color: COLORS.total }
+      },
+      {
+        name:'Urbano (%)',
+        type:'line',
+        smooth:true,
+        showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color: COLORS.urbano },
+        itemStyle:{ color: COLORS.urbano }
+      },
+      {
+        name:'Rural (%)',
+        type:'line',
+        smooth:true,
+        showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color: COLORS.rural },
+        itemStyle:{ color: COLORS.rural }
+      }
     ]
   };
 
   chart.setOption(baseOption);
 
-  // === 4) CARGA, ANIMA AÑO A AÑO (1s), Y COLOCA PICOS SIN SUPERPOSICIÓN =====
+  // === 4) CARGA Y DIBUJA (SIN PASO A PASO) ==================================
+  const byYear = Object.create(null); // índice por año para tooltip
+
   try{
     const all = await fetchRows();
     if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
-    let idx = 0;
+    // Índice por año
+    all.forEach(r => byYear[r.anio] = r);
 
-    function applyProgress() {
-      progressive.length = 0;
-      for (let i = 0; i <= idx; i++) {
-        progressive.push(all[i]);
-        byYear[all[i].anio] = all[i]; // <- mantenemos índice actualizado
-      }
-      chart.setOption({ dataset: [{ id: 'progress', source: progressive }] });
-    }
+    // Asegura alineación con el eje fijo
+    const totalData  = YEARS.map(y => (byYear[y] ? byYear[y].total  : null));
+    const urbanoData = YEARS.map(y => (byYear[y] ? byYear[y].urbano : null));
+    const ruralData  = YEARS.map(y => (byYear[y] ? byYear[y].rural  : null));
 
-    applyProgress();
-
-    // Velocidad: 1 segundo por año
-    const timer = setInterval(() => {
-      idx++;
-      if (idx >= all.length - 1) {
-        clearInterval(timer);
-        placePeakMarkers(all);
-      } else {
-        applyProgress();
-      }
-    }, 1000);
-
-    if (all.length === 1) placePeakMarkers(all);
-
-    function placePeakMarkers(rows){
-      const maxOf = (key) => {
-        let best = null;
-        rows.forEach(r => {
-          const v = +r[key];
-          if (isFinite(v)) {
-            if (!best || v > best.val) best = { anio: r.anio, val: v };
-          }
-        });
-        return best;
-      };
-
-      const peakTotal  = maxOf('total');
-      const peakUrbano = maxOf('urbano');
-      const peakRural  = maxOf('rural');
-
-      const totalMsg  = peakMessages.total [peakTotal?.anio]  || (peakTotal  ? `Pico: ${peakTotal.val.toFixed(2)}% (${peakTotal.anio})`  : '');
-      const urbanoMsg = peakMessages.urbano[peakUrbano?.anio] || (peakUrbano ? `Pico: ${peakUrbano.val.toFixed(2)}% (${peakUrbano.anio})` : '');
-      const ruralMsg  = peakMessages.rural [peakRural?.anio]  || (peakRural  ? `Pico: ${peakRural.val.toFixed(2)}% (${peakRural.anio})`  : '');
-
-      // Offsets para evitar montarse (calculados en píxeles en el eje X)
-      const peaks = [
-        peakTotal  ? { key:'total',  name:'Total (%)',  ...peakTotal,  msg: totalMsg  } : null,
-        peakUrbano ? { key:'urbano', name:'Urbano (%)', ...peakUrbano, msg: urbanoMsg } : null,
-        peakRural  ? { key:'rural',  name:'Rural (%)',  ...peakRural,  msg: ruralMsg  } : null,
-      ].filter(Boolean);
-
-      const px = {};
-      peaks.forEach(p=>{
-        const pt = chart.convertToPixel({xAxisIndex:0, yAxisIndex:0}, [p.anio, p.val]);
-        px[p.key] = { x: (pt && isFinite(pt[0]) ? pt[0] : 0), y: (pt && isFinite(pt[1]) ? pt[1] : 0) };
-      });
-
-      // Agrupa picos cercanos en X y reparte offsets verticales
-      const keys = peaks.map(p=>p.key);
-      const used = new Set();
-      const offsets = {}; // { key: [dx, dy] }
-      const X_NEAR = 60;  // umbral de cercanía horizontal (px)
-
-      for (let i=0; i<keys.length; i++){
-        const ki = keys[i];
-        if (used.has(ki)) continue;
-        const group = [ki];
-        for (let j=i+1; j<keys.length; j++){
-          const kj = keys[j];
-          if (used.has(kj)) continue;
-          if (Math.abs(px[ki].x - px[kj].x) < X_NEAR) group.push(kj);
-        }
-        group.forEach(k=>used.add(k));
-        if (group.length === 1) {
-          offsets[group[0]] = [0, 0];
-        } else if (group.length === 2) {
-          offsets[group[0]] = [0, -20];
-          offsets[group[1]] = [0,  20];
-        } else {
-          // 3 elementos
-          const ordered = group.slice().sort((a,b)=>{
-            const va = peaks.find(p=>p.key===a).val;
-            const vb = peaks.find(p=>p.key===b).val;
-            return vb - va; // desc
-          });
-          offsets[ordered[0]] = [0, -28];
-          offsets[ordered[1]] = [0,   0];
-          offsets[ordered[2]] = [0,  28];
-        }
-      }
-
-      const labelBase = {
-        show: true,
-        color:'#111',
-        backgroundColor:'#fff',
-        padding:6,
-        borderRadius:6,
-        shadowBlur:6,
-        shadowColor:'rgba(0,0,0,.12)'
-      };
-
-      const mpTotal  = peakTotal  ? [{ coord:[peakTotal.anio,  peakTotal.val],  value:peakTotal.val,  label:{ ...labelBase, formatter: totalMsg,  offset: offsets.total  || [0,0] } }] : [];
-      const mpUrbano = peakUrbano ? [{ coord:[peakUrbano.anio, peakUrbano.val], value:peakUrbano.val, label:{ ...labelBase, formatter: urbanoMsg, offset: offsets.urbano || [0,0] } }] : [];
-      const mpRural  = peakRural  ? [{ coord:[peakRural.anio,  peakRural.val],  value:peakRural.val,  label:{ ...labelBase, formatter: ruralMsg,  offset: offsets.rural  || [0,0] } }] : [];
-
-      chart.setOption({
-        series: [
-          { ...baseOption.series[0], markPoint:{ symbolSize:0, data: mpTotal  } },
-          { ...baseOption.series[1], markPoint:{ symbolSize:0, data: mpUrbano } },
-          { ...baseOption.series[2], markPoint:{ symbolSize:0, data: mpRural  } }
-        ]
-      }, { replaceMerge: ['series'] });
-    }
+    chart.setOption({
+      series: [
+        { data: totalData  },
+        { data: urbanoData },
+        { data: ruralData  }
+      ]
+    });
+    // No hay temporizador, ni markPoint/etiquetas de pico
 
   }catch(e){
     console.error(e);
@@ -271,4 +198,3 @@
 </script>
 </body>
 </html>
-
