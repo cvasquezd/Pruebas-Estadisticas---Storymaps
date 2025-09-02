@@ -75,7 +75,8 @@
   const chart = echarts.init(document.getElementById('chart'));
   window.addEventListener('resize', () => chart.resize());
 
-  const progressive = []; // se irá llenando con los datos ya conocidos
+  const progressive = [];     // datos visibles hasta el año actual
+  const byYear = Object.create(null); // índice por año para tooltip
 
   const baseOption = {
     backgroundColor: '#ffffff',
@@ -90,15 +91,23 @@
       trigger: 'axis',
       axisPointer: { type: 'line' },
       formatter: function (params) {
-        const year = params[0]?.axisValueLabel || '';
-        const map = Object.fromEntries(params.map(p => [p.seriesName, p]));
-        const names = ['Total (%)','Urbano (%)','Rural (%)'];
+        const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
+        const row = byYear[year]; // <- siempre buscamos por año
+        const cfg = [
+          { name: 'Total (%)',  key: 'total'  },
+          { name: 'Urbano (%)', key: 'urbano' },
+          { name: 'Rural (%)',  key: 'rural'  }
+        ];
+        // marcadores por serie presentes; para ausentes usamos un marcador gris
+        const markers = {};
+        (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const dotGray = '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
+
         const lines = [`<b>${year}</b>`];
-        names.forEach(n=>{
-          const p = map[n];
-          const val = p && p.value!=null && !isNaN(p.value) ? (+p.value).toFixed(2)+'%' : '—';
-          const marker = p ? p.marker : '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
-          lines.push(`${marker} ${n}: <b>${val}</b>`);
+        cfg.forEach(c => {
+          const val = row && isFinite(row[c.key]) ? row[c.key].toFixed(2) + '%' : '—';
+          const marker = markers[c.name] || dotGray;
+          lines.push(`${marker} ${c.name}: <b>${val}</b>`);
         });
         return lines.join('<br/>');
       }
@@ -142,7 +151,10 @@
 
     function applyProgress() {
       progressive.length = 0;
-      for (let i = 0; i <= idx; i++) progressive.push(all[i]);
+      for (let i = 0; i <= idx; i++) {
+        progressive.push(all[i]);
+        byYear[all[i].anio] = all[i]; // <- mantenemos índice actualizado
+      }
       chart.setOption({ dataset: [{ id: 'progress', source: progressive }] });
     }
 
@@ -210,7 +222,6 @@
           if (Math.abs(px[ki].x - px[kj].x) < X_NEAR) group.push(kj);
         }
         group.forEach(k=>used.add(k));
-        // Asigna offsets simétricos por tamaño del grupo
         if (group.length === 1) {
           offsets[group[0]] = [0, 0];
         } else if (group.length === 2) {
@@ -218,7 +229,6 @@
           offsets[group[1]] = [0,  20];
         } else {
           // 3 elementos
-          // Ordena por valor para espaciar visualmente
           const ordered = group.slice().sort((a,b)=>{
             const va = peaks.find(p=>p.key===a).val;
             const vb = peaks.find(p=>p.key===b).val;
@@ -244,7 +254,6 @@
       const mpUrbano = peakUrbano ? [{ coord:[peakUrbano.anio, peakUrbano.val], value:peakUrbano.val, label:{ ...labelBase, formatter: urbanoMsg, offset: offsets.urbano || [0,0] } }] : [];
       const mpRural  = peakRural  ? [{ coord:[peakRural.anio,  peakRural.val],  value:peakRural.val,  label:{ ...labelBase, formatter: ruralMsg,  offset: offsets.rural  || [0,0] } }] : [];
 
-      // MarkPoint SIN marcador (solo etiqueta)
       chart.setOption({
         series: [
           { ...baseOption.series[0], markPoint:{ symbolSize:0, data: mpTotal  } },
@@ -262,3 +271,4 @@
 </script>
 </body>
 </html>
+
