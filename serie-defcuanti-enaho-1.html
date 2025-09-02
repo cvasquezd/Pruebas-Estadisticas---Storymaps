@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="wrap">
-  <h1>Déficit Habitacional (%) Total - Urbano - Rural</h1>
+  <h1>Déficit Cuantitativo ENAHO(%) Total - Urbano - Rural</h1>
   <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
   <div id="chart"></div>
   <div id="err"></div>
@@ -49,7 +49,47 @@
   // Índice por año para tooltip
   const byYear = Object.create(null);
 
-  chart.setOption({
+  // --- utilidades ---
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status + " — " + url);
+    const json = await res.json();
+    if(json.error) throw new Error((json.error.message||"Error del servicio") + " — " + url);
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        total:  r.porcentaje_total  == null ? null : Number(r.porcentaje_total),
+        urbano: r.porcentaje_urbano == null ? null : Number(r.porcentaje_urbano),
+        rural:  r.porcentaje_rural  == null ? null : Number(r.porcentaje_rural),
+      }));
+  }
+
+  function firstValidIndex(arr){
+    for(let i=0;i<arr.length;i++){ const v=arr[i]; if(v!=null && isFinite(v)) return i; }
+    return -1;
+  }
+  // Construye una "línea semilla": mantiene nulos antes del 1er dato y, desde ahí, repite el 1er valor.
+  function makeSeed(arr){
+    const idx = firstValidIndex(arr);
+    if(idx < 0) return arr.slice();
+    const v0 = arr[idx];
+    return arr.map((v,i)=> i < idx ? null : v0);
+  }
+
+  // --- configuración base ---
+  const baseOption = {
     backgroundColor: '#ffffff',
     color: [COLORS.total, COLORS.urbano, COLORS.rural],
     grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
@@ -99,10 +139,9 @@
       splitLine: { show: true },
       scale: true
     },
-    animation: true,
-    animationDuration: 1400,
+    animationDuration: 1200,
     animationEasing: 'linear',
-    animationDurationUpdate: 600,
+    animationDurationUpdate: 800,
     series: [
       {
         name:'Total (%)', type:'line',
@@ -132,36 +171,10 @@
         label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
       }
     ]
-  });
+  };
 
-  // === 2) Descarga y pinta ===================================================
+  chart.setOption(baseOption);
   chart.showLoading('default', { text:'Cargando…' });
-
-  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
-
-  async function fetchRows(){
-    const url = qs(SERVICE_URL, {
-      where: WHERE,
-      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
-      orderByFields: "anio ASC",
-      returnGeometry: "false",
-      f: "json"
-    });
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) throw new Error("HTTP " + res.status + " — " + url);
-    const json = await res.json();
-    if(json.error) throw new Error((json.error.message||"Error del servicio") + " — " + url);
-    const rows = (json.features || []).map(f => f.attributes);
-    return rows
-      .filter(r => r && r.anio != null)
-      .sort((a,b) => Number(a.anio) - Number(b.anio))
-      .map(r => ({
-        anio: String(r.anio),
-        total:  r.porcentaje_total  == null ? null : Number(r.porcentaje_total),
-        urbano: r.porcentaje_urbano == null ? null : Number(r.porcentaje_urbano),
-        rural:  r.porcentaje_rural  == null ? null : Number(r.porcentaje_rural),
-      }));
-  }
 
   let labelsShown = false;
 
@@ -177,10 +190,15 @@
     // Índice por año
     all.forEach(r => byYear[r.anio] = r);
 
-    // Datos alineados al eje fijo
+    // Datos reales alineados al eje fijo
     const totalData  = YEARS.map(y => (byYear[y] ? byYear[y].total  : null));
     const urbanoData = YEARS.map(y => (byYear[y] ? byYear[y].urbano : null));
     const ruralData  = YEARS.map(y => (byYear[y] ? byYear[y].rural  : null));
+
+    // Líneas semilla (planas a partir del primer dato de cada serie)
+    const seedTotal  = makeSeed(totalData);
+    const seedUrbano = makeSeed(urbanoData);
+    const seedRural  = makeSeed(ruralData);  // <- evita el “caer” de Rural
 
     // Ajuste de eje Y (si hay valores válidos)
     const vals = [...totalData, ...urbanoData, ...ruralData].filter(v => v!=null && isFinite(v));
@@ -190,17 +208,27 @@
       const maxVal = Math.max(...vals);
       const pad = Math.max((maxVal - minVal) * 0.08, 0.5);
       opt.yAxis = { min: Math.floor(minVal - pad), max: Math.ceil(maxVal + pad) };
-    } else {
-      $err.textContent = "Atención: el servicio respondió, pero las series están vacías para " + YEARS.join(", ") + ".";
     }
 
+    // 1) Pintamos semillas SIN animación (todo plano desde el primer dato)
     chart.setOption({
       ...opt,
       series: [
-        { data: totalData  },
-        { data: urbanoData },
-        { data: ruralData  }
+        { data: seedTotal  },
+        { data: seedUrbano },
+        { data: seedRural  }
       ]
+    }, { notMerge:false, lazyUpdate:false });
+
+    // 2) En el siguiente frame, actualizamos a los datos reales CON animación
+    requestAnimationFrame(() => {
+      chart.setOption({
+        series: [
+          { data: totalData  },
+          { data: urbanoData },
+          { data: ruralData  }
+        ]
+      });
     });
 
     // Mostrar etiquetas al terminar la animación inicial
