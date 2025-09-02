@@ -7,7 +7,10 @@
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     :root{
-      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
       --shadow:0 4px 20px rgba(0,0,0,.08);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -44,14 +47,44 @@
   };
   // --------------------------------------------------------------------------
 
+  // === 2) UTILIDADES =========================================================
   const $err = document.getElementById('err');
+  function qs(url, params){
+    return url + "?" + new URLSearchParams(params).toString();
+  }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        total:  r.porcentaje_total  == null ? null : +Number(r.porcentaje_total ).toFixed(2),
+        urbano: r.porcentaje_urbano == null ? null : +Number(r.porcentaje_urbano).toFixed(2),
+        rural:  r.porcentaje_rural  == null ? null : +Number(r.porcentaje_rural ).toFixed(2),
+      }));
+  }
+
+  // === 3) INICIA EL CHART ====================================================
   const chart = echarts.init(document.getElementById('chart'));
   window.addEventListener('resize', () => chart.resize());
 
   // Índice por año para tooltip
   const byYear = Object.create(null);
 
-  chart.setOption({
+  const baseOption = {
     backgroundColor: '#ffffff',
     color: [COLORS.total, COLORS.urbano, COLORS.rural],
     grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
@@ -77,8 +110,7 @@
         const dotGray = '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
         const lines = [`<b>${year}</b>`];
         cfg.forEach(c => {
-          const v = row && isFinite(row[c.key]) ? Number(row[c.key]) : null;
-          const val = v==null ? '—' : v.toFixed(2) + '%';
+          const val = row && isFinite(row[c.key]) ? row[c.key].toFixed(2) + '%' : '—';
           const marker = markers[c.name] || dotGray;
           lines.push(`${marker} ${c.name}: <b>${val}</b>`);
         });
@@ -88,8 +120,10 @@
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: YEARS,
-      name: 'Año', nameLocation: 'middle', nameGap: 28,
+      data: YEARS,               // EJE X FIJO
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 28,
       axisTick: { alignWithLabel: true },
       animation: false
     },
@@ -99,76 +133,51 @@
       nameTextStyle: { padding: [0,0,0,-4] },
       axisLabel: { formatter: '{value}%' },
       splitLine: { show: true },
-      scale: true   // no fuerza incluir 0
+      scale: true               // ayuda a separar visualmente (no fuerza incluir 0)
     },
     animation: true,
-    animationDuration: 1400,
+    animationDuration: 1400,       // animación continua de trazo
     animationEasing: 'linear',
     animationDurationUpdate: 600,
     series: [
       {
-        name:'Total (%)', type:'line', smooth:true,
+        name:'Total (%)',
+        type:'line',
+        smooth:true,
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.total },
         itemStyle:{ color: COLORS.total },
         label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
       },
       {
-        name:'Urbano (%)', type:'line', smooth:true,
+        name:'Urbano (%)',
+        type:'line',
+        smooth:true,
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.urbano },
         itemStyle:{ color: COLORS.urbano },
         label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
       },
       {
-        name:'Rural (%)', type:'line', smooth:true,
+        name:'Rural (%)',
+        type:'line',
+        smooth:true,
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.rural },
         itemStyle:{ color: COLORS.rural },
         label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
       }
     ]
-  });
+  };
 
-  // === 2) Descarga y pinta ===================================================
-  chart.showLoading('default', { text:'Cargando…' });
+  chart.setOption(baseOption);
 
-  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
-
-  async function fetchRows(){
-    const url = qs(SERVICE_URL, {
-      where: WHERE,
-      outFields: "anio,porcentaje_total,porcentaje_urbano,porcentaje_rural",
-      orderByFields: "anio ASC",
-      returnGeometry: "false",
-      f: "json"
-    });
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) throw new Error("HTTP " + res.status + " — " + url);
-    const json = await res.json();
-    if(json.error) throw new Error((json.error.message||"Error del servicio") + " — " + url);
-    const rows = (json.features || []).map(f => f.attributes);
-    return rows
-      .filter(r => r && r.anio != null)
-      .sort((a,b) => Number(a.anio) - Number(b.anio))
-      .map(r => ({
-        anio: String(r.anio),
-        total:  r.porcentaje_total  == null ? null : Number(r.porcentaje_total),
-        urbano: r.porcentaje_urbano == null ? null : Number(r.porcentaje_urbano),
-        rural:  r.porcentaje_rural  == null ? null : Number(r.porcentaje_rural),
-      }));
-  }
-
+  // === 4) CARGA Y DIBUJA (SIN PASO A PASO) + ETIQUETAS AL FINAL =============
   let labelsShown = false;
 
   try{
     const all = await fetchRows();
-    chart.hideLoading();
-
-    if (!all.length) {
-      $err.textContent = "No se recibieron registros para el filtro solicitado.\nFiltro: " + WHERE;
-      return;
-    }
+    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
     // Índice por año
     all.forEach(r => byYear[r.anio] = r);
@@ -178,20 +187,16 @@
     const urbanoData = YEARS.map(y => (byYear[y] ? byYear[y].urbano : null));
     const ruralData  = YEARS.map(y => (byYear[y] ? byYear[y].rural  : null));
 
-    // Ajuste de eje Y (si hay valores válidos)
+    // Ajuste de eje Y para más "aire" entre líneas
     const vals = [...totalData, ...urbanoData, ...ruralData].filter(v => v!=null && isFinite(v));
-    const opt = {};
-    if (vals.length > 0) {
-      const minVal = Math.min(...vals);
-      const maxVal = Math.max(...vals);
-      const pad = Math.max((maxVal - minVal) * 0.08, 0.5);
-      opt.yAxis = { min: Math.floor(minVal - pad), max: Math.ceil(maxVal + pad) };
-    } else {
-      $err.textContent = "Atención: el servicio respondió, pero todas las series son nulas para los años " + YEARS.join(", ") + ".\nVerifica campos/valores con cod_var=46.";
-    }
+    const minVal = Math.min(...vals);
+    const maxVal = Math.max(...vals);
+    const pad = Math.max((maxVal - minVal) * 0.08, 0.5); // al menos 0.5 p.p.
+    const yMin = Math.floor(minVal - pad);
+    const yMax = Math.ceil (maxVal + pad);
 
     chart.setOption({
-      ...opt,
+      yAxis: { min: yMin, max: yMax },
       series: [
         { data: totalData  },
         { data: urbanoData },
@@ -199,7 +204,7 @@
       ]
     });
 
-    // Mostrar etiquetas al terminar la animación inicial
+    // Cuando termina la animación inicial, mostramos etiquetas por punto
     chart.off('finished');
     chart.on('finished', () => {
       if (labelsShown) return;
@@ -214,7 +219,6 @@
     });
 
   }catch(e){
-    chart.hideLoading();
     console.error(e);
     $err.textContent = "Error: " + (e && e.message ? e.message : e);
   }
