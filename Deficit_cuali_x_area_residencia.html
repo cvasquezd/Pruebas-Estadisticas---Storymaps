@@ -31,7 +31,7 @@
   // ===== Config =====
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
   const WHERE = "cod_var = 50 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
-  const STEP_MS = 500; // velocidad: 1s por año
+  const STEP_MS = 1000; // velocidad: 1s por año
 
   const $err = document.getElementById('err');
   function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
