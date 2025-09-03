@@ -7,10 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     :root{
-      --bg:#ffffff;
-      --fg:#111827;
-      --muted:#6b7280;
-      --card:#fafafa;
+      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
       --shadow:0 4px 20px rgba(0,0,0,.08);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -31,10 +28,10 @@
 
 <script>
 (async function () {
-  // === Configuración del servicio ===
+  // ===== Config =====
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
   const WHERE = "cod_var = 48 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
-  const INTERVAL_MS = 1000; // velocidad de revelado año a año
+  const STEP_MS = 1000; // velocidad: 1s por año
 
   const $err = document.getElementById('err');
   function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
@@ -52,129 +49,88 @@
     const json = await res.json();
     if(json.error) throw new Error(json.error.message || "Error del servicio");
 
-    // Mapeo + saneo
     const rows = (json.features || [])
       .map(f => f.attributes)
       .filter(r => r && r.anio != null)
       .sort((a,b) => Number(a.anio) - Number(b.anio))
-      .map(r => ({
-        anio: String(r.anio),
-        u: +Number(r.porcentaje_urbano ?? 0),
-        r: +Number(r.porcentaje_rural  ?? 0)
-      }));
+      .map(r => {
+        // valores originales (ej. 78.97 y 21.03)
+        let u = +Number(r.porcentaje_urbano ?? 0);
+        let rr = +Number(r.porcentaje_rural ?? 0);
+        // si no suman aprox 100, normalizamos
+        const s = u + rr;
+        if (s > 0 && (s < 99 || s > 101)) {
+          u = u / s * 100;
+          rr = rr / s * 100;
+        }
+        return { anio: String(r.anio), u: +u.toFixed(2), r: +rr.toFixed(2) };
+      });
 
-    // Normalizamos para apilar al 100% (por si no suman exactamente 100)
-    const norm = rows.map(x => {
-      const sum = (isFinite(x.u)?x.u:0) + (isFinite(x.r)?x.r:0);
-      // si la suma parece estar en 0–200, preferimos dividir por la suma; si no, asumimos que vienen en 0–100 y dividimos por 100
-      const denom = (sum > 0.0001 && sum <= 200) ? sum : 100;
-      return { anio: x.anio, urbano_s: (x.u/denom), rural_s: (x.r/denom) };
-    });
-
-    return norm;
+    return rows;
   }
 
-  // === Inicializa ECharts ===
+  // ===== Chart =====
   const chart = echarts.init(document.getElementById('chart'));
   window.addEventListener('resize', () => chart.resize());
 
-  const progressive = []; // se llenará con años progresivamente
-
+  const years = [], urbano = [], rural = [];
   const baseOption = {
     backgroundColor: '#ffffff',
     grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
     legend: {
-      top: 8, left: 'center',
-      selectedMode: false,
+      top: 8, left: 'center', selectedMode: false,
       itemWidth: 18, itemHeight: 10, icon: 'roundRect',
-      textStyle: { fontSize: 12 },
-      data: ['Urbano','Rural']
+      textStyle: { fontSize: 12 }, data: ['Urbano','Rural']
     },
     tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      formatter: (params) => {
-        const year = params?.[0]?.axisValueLabel || '';
-        const lines = [`<b>${year}</b>`];
-        params.forEach(p => {
-          if (p.value == null || isNaN(p.value)) return;
-          lines.push(`${p.marker} ${p.seriesName}: <b>${(p.value*100).toFixed(1)}%</b>`);
-        });
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: (ps) => {
+        const y = ps?.[0]?.axisValueLabel || '';
+        const lines = [`<b>${y}</b>`];
+        ps.forEach(p => lines.push(`${p.marker} ${p.seriesName}: <b>${(+p.value).toFixed(2)}%</b>`));
         return lines.join('<br/>');
       }
     },
-    dataset: [{ id: 'progress', source: progressive }],
-    xAxis: {
-      type: 'category',
-      name: 'Año',
-      nameLocation: 'middle',
-      nameGap: 28,
-      axisTick: { alignWithLabel: true }
-    },
-    yAxis: {
-      type: 'value',
-      min: 0, max: 1,
-      axisLabel: { formatter: (v) => Math.round(v*100) + '%' },
-      splitLine: { show: true }
-    },
+    xAxis: { type: 'category', data: years, name: 'Año', nameLocation: 'middle', nameGap: 28, axisTick:{alignWithLabel:true} },
+    yAxis: { type: 'value', min:0, max:100, axisLabel:{ formatter: '{value}%' }, splitLine:{show:true} },
     animation: true,
-    animationDuration: 500,
-    animationEasing: 'linear',
     series: [
       {
-        name:'Urbano',
-        type:'bar',
-        stack:'total',
-        barWidth:'60%',
-        datasetId:'progress',
-        encode:{ x:'anio', y:'urbano_s' },
-        label:{
-          show:true,
-          formatter:(p)=> (p.value*100).toFixed(1)+'%',
-          position:'inside'
-        },
+        name:'Urbano', type:'bar', stack:'total', barWidth:'60%',
+        data: urbano,
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
         emphasis:{ focus:'series' }
       },
       {
-        name:'Rural',
-        type:'bar',
-        stack:'total',
-        barWidth:'60%',
-        datasetId:'progress',
-        encode:{ x:'anio', y:'rural_s' },
-        label:{
-          show:true,
-          formatter:(p)=> (p.value*100).toFixed(1)+'%',
-          position:'inside'
-        },
+        name:'Rural', type:'bar', stack:'total', barWidth:'60%',
+        data: rural,
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
         emphasis:{ focus:'series' }
       }
     ]
   };
-
   chart.setOption(baseOption);
 
-  // === Carga y animación año a año ===
+  // ===== Carga + animación =====
   try{
-    const all = await fetchRows();
-    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+    const rows = await fetchRows();
+    if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
-    let idx = 0;
-    function applyProgress(){
-      progressive.length = 0;
-      for (let i = 0; i <= idx; i++) progressive.push(all[i]);
-      chart.setOption({ dataset: [{ id:'progress', source: progressive }] });
-    }
-
-    applyProgress();
+    let i = 0;
+    // agrega el primer año y arranca
+    years.push(rows[0].anio);
+    urbano.push(rows[0].u);
+    rural.push(rows[0].r);
+    chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
 
     const timer = setInterval(() => {
-      idx++;
-      if (idx >= all.length - 1) {
-        clearInterval(timer);
-      }
-      applyProgress();
-    }, INTERVAL_MS);
+      i++;
+      if (i >= rows.length) { clearInterval(timer); return; }
+      years.push(rows[i].anio);
+      urbano.push(rows[i].u);
+      rural.push(rows[i].r);
+      chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
+    }, STEP_MS);
 
   }catch(e){
     console.error(e);
