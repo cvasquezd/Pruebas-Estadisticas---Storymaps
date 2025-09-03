@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Distribución del déficit habitacional por área de residencia</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Distribución del déficit habitacional por área de residencia</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer (vw_story_indicador_vivienda_03 · capa 6) · cod_var = 48 · NACIONAL</p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function () {
+  // === Configuración del servicio ===
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 48 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+  const INTERVAL_MS = 1000; // velocidad de revelado año a año
+
+  const $err = document.getElementById('err');
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+
+    // Mapeo + saneo
+    const rows = (json.features || [])
+      .map(f => f.attributes)
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        u: +Number(r.porcentaje_urbano ?? 0),
+        r: +Number(r.porcentaje_rural  ?? 0)
+      }));
+
+    // Normalizamos para apilar al 100% (por si no suman exactamente 100)
+    const norm = rows.map(x => {
+      const sum = (isFinite(x.u)?x.u:0) + (isFinite(x.r)?x.r:0);
+      // si la suma parece estar en 0–200, preferimos dividir por la suma; si no, asumimos que vienen en 0–100 y dividimos por 100
+      const denom = (sum > 0.0001 && sum <= 200) ? sum : 100;
+      return { anio: x.anio, urbano_s: (x.u/denom), rural_s: (x.r/denom) };
+    });
+
+    return norm;
+  }
+
+  // === Inicializa ECharts ===
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  const progressive = []; // se llenará con años progresivamente
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    legend: {
+      top: 8, left: 'center',
+      selectedMode: false,
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 },
+      data: ['Urbano','Rural']
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const year = params?.[0]?.axisValueLabel || '';
+        const lines = [`<b>${year}</b>`];
+        params.forEach(p => {
+          if (p.value == null || isNaN(p.value)) return;
+          lines.push(`${p.marker} ${p.seriesName}: <b>${(p.value*100).toFixed(1)}%</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    dataset: [{ id: 'progress', source: progressive }],
+    xAxis: {
+      type: 'category',
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 28,
+      axisTick: { alignWithLabel: true }
+    },
+    yAxis: {
+      type: 'value',
+      min: 0, max: 1,
+      axisLabel: { formatter: (v) => Math.round(v*100) + '%' },
+      splitLine: { show: true }
+    },
+    animation: true,
+    animationDuration: 500,
+    animationEasing: 'linear',
+    series: [
+      {
+        name:'Urbano',
+        type:'bar',
+        stack:'total',
+        barWidth:'60%',
+        datasetId:'progress',
+        encode:{ x:'anio', y:'urbano_s' },
+        label:{
+          show:true,
+          formatter:(p)=> (p.value*100).toFixed(1)+'%',
+          position:'inside'
+        },
+        emphasis:{ focus:'series' }
+      },
+      {
+        name:'Rural',
+        type:'bar',
+        stack:'total',
+        barWidth:'60%',
+        datasetId:'progress',
+        encode:{ x:'anio', y:'rural_s' },
+        label:{
+          show:true,
+          formatter:(p)=> (p.value*100).toFixed(1)+'%',
+          position:'inside'
+        },
+        emphasis:{ focus:'series' }
+      }
+    ]
+  };
+
+  chart.setOption(baseOption);
+
+  // === Carga y animación año a año ===
+  try{
+    const all = await fetchRows();
+    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    let idx = 0;
+    function applyProgress(){
+      progressive.length = 0;
+      for (let i = 0; i <= idx; i++) progressive.push(all[i]);
+      chart.setOption({ dataset: [{ id:'progress', source: progressive }] });
+    }
+
+    applyProgress();
+
+    const timer = setInterval(() => {
+      idx++;
+      if (idx >= all.length - 1) {
+        clearInterval(timer);
+      }
+      applyProgress();
+    }, INTERVAL_MS);
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
