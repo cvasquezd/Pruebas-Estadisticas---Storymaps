@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Distribución del déficit habitacional por área de residencia</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Distribución del déficit cuantitativo por área de residencia</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer (vw_story_indicador_vivienda_03 · capa 6) · cod_var = 48 · NACIONAL</p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function () {
+  // ===== Config =====
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 50 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+  const STEP_MS = 500; // velocidad: 1s por año
+
+  const $err = document.getElementById('err');
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,porcentaje_urbano,porcentaje_rural",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+
+    const rows = (json.features || [])
+      .map(f => f.attributes)
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => {
+        // valores originales (ej. 78.97 y 21.03)
+        let u = +Number(r.porcentaje_urbano ?? 0);
+        let rr = +Number(r.porcentaje_rural ?? 0);
+        // si no suman aprox 100, normalizamos
+        const s = u + rr;
+        if (s > 0 && (s < 99 || s > 101)) {
+          u = u / s * 100;
+          rr = rr / s * 100;
+        }
+        return { anio: String(r.anio), u: +u.toFixed(2), r: +rr.toFixed(2) };
+      });
+
+    return rows;
+  }
+
+  // ===== Chart =====
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  const years = [], urbano = [], rural = [];
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    color: ['#5470C6', '#22C55E'], // Urbano, Rural
+    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    legend: {
+      top: 8, left: 'center', selectedMode: false,
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 }, data: ['Urbano','Rural']
+    },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: (ps) => {
+        const y = ps?.[0]?.axisValueLabel || '';
+        const lines = [`<b>${y}</b>`];
+        ps.forEach(p => lines.push(`${p.marker} ${p.seriesName}: <b>${(+p.value).toFixed(2)}%</b>`));
+        return lines.join('<br/>');
+      }
+    },
+    xAxis: { type: 'category', data: years, name: 'Año', nameLocation: 'middle', nameGap: 28, axisTick:{alignWithLabel:true} },
+    yAxis: { type: 'value', min:0, max:100, axisLabel:{ formatter: '{value}%' }, splitLine:{show:true} },
+    animation: true,
+    series: [
+      {
+        name:'Urbano', type:'bar', stack:'total', barWidth:'60%',
+        data: urbano,
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
+        emphasis:{ focus:'series' }
+      },
+      {
+        name:'Rural', type:'bar', stack:'total', barWidth:'60%',
+        data: rural,
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
+        emphasis:{ focus:'series' }
+      }
+    ]
+  };
+  chart.setOption(baseOption);
+
+  // ===== Carga + animación =====
+  try{
+    const rows = await fetchRows();
+    if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    let i = 0;
+    // agrega el primer año y arranca
+    years.push(rows[0].anio);
+    urbano.push(rows[0].u);
+    rural.push(rows[0].r);
+    chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
+
+    const timer = setInterval(() => {
+      i++;
+      if (i >= rows.length) { clearInterval(timer); return; }
+      years.push(rows[i].anio);
+      urbano.push(rows[i].u);
+      rural.push(rows[i].r);
+      chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
+    }, STEP_MS);
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
