@@ -8,28 +8,23 @@
   <style>
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    /* Llenar todo el iframe del Story Map */
-    #chart{width:100%;height:100%;}
-    /* Error flotante para no generar scroll */
-    #err{position:absolute;left:6px;bottom:6px;background:rgba(255,255,255,.9);color:#b91c1c;
-         font-size:11px;padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap}
+    #chart{width:100%;height:100%}
+    #err{position:absolute;left:6px;bottom:6px;background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap;display:none}
   </style>
 </head>
 <body>
   <div id="chart"></div>
-  <div id="err" style="display:none"></div>
+  <div id="err"></div>
 
 <script>
 (async function () {
-  // ===== Config =====
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
-  // (Usando tu WHERE original; ajusta si corresponde)
   const WHERE = "cod_var = 50 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
-  const STEP_MS = 1000; // 1s por año (puedes bajar a 700 si quieres más ágil)
+  const STEP_MS = 1000;
 
   const $err = document.getElementById('err');
-  function showErr(msg){ $err.style.display='block'; $err.textContent = msg; }
-  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; }
+  const qs = (url, params)=> url + "?" + new URLSearchParams(params).toString();
 
   async function fetchRows(){
     const url = qs(SERVICE_URL, {
@@ -44,7 +39,7 @@
     const json = await res.json();
     if(json.error) throw new Error(json.error.message || "Error del servicio");
 
-    const rows = (json.features || [])
+    return (json.features || [])
       .map(f => f.attributes)
       .filter(r => r && r.anio != null)
       .sort((a,b) => Number(a.anio) - Number(b.anio))
@@ -55,21 +50,21 @@
         if (s > 0 && (s < 99 || s > 101)) { u = u / s * 100; rr = rr / s * 100; }
         return { anio: String(r.anio), u: +u.toFixed(2), r: +rr.toFixed(2) };
       });
-    return rows;
   }
 
-  // ===== Chart =====
   const chart = echarts.init(document.getElementById('chart'));
   const years = [], urbano = [], rural = [];
 
   chart.setOption({
     backgroundColor: '#ffffff',
-    color: ['#5470C6', '#22C55E'], // Urbano, Rural
-    grid: { left: 42, right: 8, top: 8, bottom: 28, containLabel: true }, // súper compacto
+    color: ['#5470C6', '#22C55E'],
+    /* ↑↑ MÁS ESPACIO ARRIBA PARA LA LEYENDA */
+    grid: { left: 42, right: 8, top: 54, bottom: 26, containLabel: true },
     legend: {
-      top: 6, left: 'center', selectedMode: false,
+      top: 8, left: 'center', selectedMode: false,
       itemWidth: 12, itemHeight: 7, icon: 'roundRect',
-      textStyle: { fontSize: 11 }, data: ['Urbano','Rural']
+      textStyle: { fontSize: 11 },
+      data: ['Urbano','Rural']
     },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' }, confine: true,
@@ -92,42 +87,29 @@
     },
     animation: true,
     series: [
-      {
-        name:'Urbano', type:'bar', stack:'total', barWidth:'60%',
-        data: urbano,
-        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
-        emphasis:{ focus:'series' }
-      },
-      {
-        name:'Rural', type:'bar', stack:'total', barWidth:'60%',
-        data: rural,
-        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
-        emphasis:{ focus:'series' }
-      }
+      { name:'Urbano', type:'bar', stack:'total', barWidth:'60%',
+        data: urbano, label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
+        emphasis:{ focus:'series' } },
+      { name:'Rural', type:'bar', stack:'total', barWidth:'60%',
+        data: rural, label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
+        emphasis:{ focus:'series' } }
     ]
   });
 
-  // Redimensiona al tamaño del iframe sin generar scroll
-  const resize = () => chart.resize();
-  window.addEventListener('resize', resize, { passive:true });
+  window.addEventListener('resize', () => chart.resize(), { passive:true });
 
-  // ===== Carga + animación =====
   try{
     const rows = await fetchRows();
     if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
     let i = 0;
-    years.push(rows[0].anio);
-    urbano.push(rows[0].u);
-    rural.push(rows[0].r);
+    years.push(rows[0].anio); urbano.push(rows[0].u); rural.push(rows[0].r);
     chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
 
     const timer = setInterval(() => {
       i++;
       if (i >= rows.length) { clearInterval(timer); return; }
-      years.push(rows[i].anio);
-      urbano.push(rows[i].u);
-      rural.push(rows[i].r);
+      years.push(rows[i].anio); urbano.push(rows[i].u); rural.push(rows[i].r);
       chart.setOption({ xAxis:{ data: years }, series:[ {data: urbano}, {data: rural} ] });
     }, STEP_MS);
 
@@ -139,3 +121,4 @@
 </script>
 </body>
 </html>
+
