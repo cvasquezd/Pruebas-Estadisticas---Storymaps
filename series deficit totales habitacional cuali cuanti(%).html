@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Déficit Habitacional totales (%) (2017–2024)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 3px 12px rgba(0,0,0,.07);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{
+      max-width:760px;               /* ancho compacto para story panel */
+      margin:8px auto;               /* menos margen vertical */
+      padding:0 10px;
+    }
+    h1{
+      font-weight:700;
+      font-size:16px;                /* título compacto */
+      margin:0 0 6px
+    }
+    .sub{
+      color:var(--muted);
+      font-size:11px;                /* subtítulo compacto */
+      margin:0 0 8px
+    }
+    #chart{
+      height:360px;                  /* alto fijo y pequeño para embebido */
+      min-height:300px;
+      background:var(--card);
+      border-radius:12px;
+      box-shadow:var(--shadow)
+    }
+    #err{margin-top:8px;color:#b91c1c;font-size:11px;white-space:pre-wrap}
+    @media (max-width:480px){
+      #wrap{padding:0 8px}
+      h1{font-size:15px}
+      .sub{font-size:10px}
+      #chart{height:300px;min-height:260px}
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Déficit Habitacional totales (%) (2017–2024)</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  // === 1) CONFIGURA TU SERVICIO =============================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+
+  // Filtros
+  const REGION = "NACIONAL";
+  const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
+  const CODS  = [45, 46, 47];
+
+  // 🎨 NOMBRES Y COLORES
+  const NAMES = {
+    45: "Déficit Habitacional (%)",
+    46: "Déficit Cuantitativo (%)",
+    47: "Déficit Cualitativo (%)"
+  };
+  const COLORS = {
+    45: "#0ea5e9", // azul
+    46: "#22c55e", // verde
+    47: "#ef4444"  // rojo
+  };
+
+  // === 2) UTILIDADES =========================================================
+  const $err = document.getElementById('err');
+  function qs(url, params){
+    return url + "?" + new URLSearchParams(params).toString();
+  }
+
+  async function fetchRows(){
+    const WHERE = `region_nombre='${REGION}' AND cod_var IN (${CODS.join(",")}) AND anio BETWEEN ${YEARS[0]} AND ${YEARS[YEARS.length-1]}`;
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,cod_var,porcentaje_total",
+      orderByFields: "anio ASC, cod_var ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null && r.cod_var != null)
+      .map(r => ({
+        anio: String(r.anio),
+        cod : Number(r.cod_var),
+        val : Number(r.porcentaje_total ?? 0) // valor en porcentaje (ej. 78.97)
+      }));
+  }
+
+  // === 3) INICIA EL CHART ====================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  // Estructura: por año y cod_var -> valor
+  const byYearCod = Object.create(null);
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    color: CODS.map(c => COLORS[c]),
+    grid: { left: 54, right: 12, top: 40, bottom: 40, containLabel: true }, // paddings compactos
+    legend: {
+      top: 6, left: 'center',
+      itemWidth: 16, itemHeight: 9, icon: 'roundRect',
+      textStyle: { fontSize: 11 },
+      data: CODS.map(c => NAMES[c] || `cod_var ${c}`)
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      confine: true,
+      formatter: function (params) {
+        const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
+        const row = byYearCod[year] || {};
+        const markers = {};
+        (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const lines = [`<b>${year}</b>`];
+        CODS.forEach(c => {
+          const name = NAMES[c] || `cod_var ${c}`;
+          const v = row[c];
+          const val = (v==null || !isFinite(v)) ? '—' : (Number(v).toFixed(2) + '%');
+          const m = markers[name] || '';
+          lines.push(`${m} ${name}: <b>${val}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: YEARS,
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 24,
+      axisLabel: { fontSize: 11 },
+      axisTick: { alignWithLabel: true },
+      animation: false
+    },
+    yAxis: {
+      type: 'value',
+      name: '%',
+      nameTextStyle: { padding: [0,0,0,-6], fontSize: 11 },
+      axisLabel: {
+        fontSize: 11,
+        formatter: function(v){ return (Math.round(v*100)/100) + '%'; }
+      },
+      splitLine: { show: true },
+      scale: true
+    },
+    animation: true,
+    animationDuration: 900,
+    animationEasing: 'linear',
+    animationDurationUpdate: 500,
+    series: CODS.map(c => ({
+      name: NAMES[c] || `cod_var ${c}`,
+      type: 'line',
+      smooth: true,
+      showSymbol: true, symbol: 'circle', symbolSize: 5,
+      lineStyle: { width: 2, color: COLORS[c] },
+      itemStyle: { color: COLORS[c] },
+      label: {
+        show: false,
+        formatter: (p) => (p.value==null ? '' : (+p.value).toFixed(2) + '%'),
+        position: 'top', distance: 6, fontSize: 10
+      },
+      data: YEARS.map(() => null)
+    }))
+  };
+
+  chart.setOption(baseOption);
+
+  // === 4) CARGA, ALINEA Y DIBUJA ============================================
+  let labelsShown = false;
+
+  try{
+    const rows = await fetchRows();
+    if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    // Indexar por año y cod_var
+    YEARS.forEach(y => { byYearCod[y] = {}; });
+    rows.forEach(r => {
+      if (!byYearCod[r.anio]) byYearCod[r.anio] = {};
+      byYearCod[r.anio][r.cod] = r.val;
+    });
+
+    // Construir data por serie
+    const seriesData = {};
+    CODS.forEach(c => {
+      seriesData[c] = YEARS.map(y => {
+        const v = byYearCod[y] ? byYearCod[y][c] : null;
+        return (v==null || !isFinite(v)) ? null : +Number(v).toFixed(2);
+      });
+    });
+
+    // Min/Max con "aire"
+    const vals = CODS.flatMap(c => seriesData[c]).filter(v => v!=null && isFinite(v));
+    const minVal = Math.min(...vals);
+    const maxVal = Math.max(...vals);
+    const pad = Math.max((maxVal - minVal) * 0.08, 1); // 8% del rango o al menos 1 punto %
+
+    chart.setOption({
+      yAxis: {
+        min: Math.floor(minVal - pad),
+        max: Math.ceil (maxVal + pad)
+      },
+      series: CODS.map(c => ({ data: seriesData[c] }))
+    });
+
+    // Mostrar etiquetas al final de la animación inicial
+    chart.off('finished');
+    chart.on('finished', () => {
+      if (labelsShown) return;
+      labelsShown = true;
+      chart.setOption({
+        series: CODS.map(c => ({ label: { show: true } }))
+      });
+    });
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
