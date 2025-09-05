@@ -3,44 +3,32 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Distribución del déficit por área (compacto)</title>
+  <title>Déficit cualitativo — compacto</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
-    :root{
-      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
-      --shadow:0 3px 12px rgba(0,0,0,.07);
-    }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    /* Layout compacto para panel de Story Map */
-    #wrap{max-width:760px;margin:6px auto;padding:0 8px}
-    #chart{
-      height:320px;           /* ajusta aquí si lo necesitas (280–360px) */
-      min-height:260px;
-      background:var(--card);
-      border-radius:12px;
-      box-shadow:var(--shadow)
-    }
-    #err{margin-top:6px;color:#b91c1c;font-size:11px;white-space:pre-wrap}
-    @media (max-width:480px){
-      #wrap{padding:0 6px}
-      #chart{height:300px;min-height:250px}
-    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    /* Llenar todo el iframe del Story Map */
+    #chart{width:100%;height:100%;}
+    /* Error flotante para no generar scroll */
+    #err{position:absolute;left:6px;bottom:6px;background:rgba(255,255,255,.9);color:#b91c1c;
+         font-size:11px;padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap}
   </style>
 </head>
 <body>
-<div id="wrap">
   <div id="chart"></div>
-  <div id="err"></div>
-</div>
+  <div id="err" style="display:none"></div>
 
 <script>
 (async function () {
   // ===== Config =====
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  // (Usando tu WHERE original; ajusta si corresponde)
   const WHERE = "cod_var = 50 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
-  const STEP_MS = 1000; // velocidad: 1s por año
+  const STEP_MS = 1000; // 1s por año (puedes bajar a 700 si quieres más ágil)
 
   const $err = document.getElementById('err');
+  function showErr(msg){ $err.style.display='block'; $err.textContent = msg; }
   function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
 
   async function fetchRows(){
@@ -72,16 +60,15 @@
 
   // ===== Chart =====
   const chart = echarts.init(document.getElementById('chart'));
-  window.addEventListener('resize', () => chart.resize());
-
   const years = [], urbano = [], rural = [];
-  const baseOption = {
+
+  chart.setOption({
     backgroundColor: '#ffffff',
     color: ['#5470C6', '#22C55E'], // Urbano, Rural
-    grid: { left: 48, right: 12, top: 28, bottom: 36, containLabel: true }, // márgenes compactos
+    grid: { left: 42, right: 8, top: 8, bottom: 28, containLabel: true }, // súper compacto
     legend: {
       top: 6, left: 'center', selectedMode: false,
-      itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+      itemWidth: 12, itemHeight: 7, icon: 'roundRect',
       textStyle: { fontSize: 11 }, data: ['Urbano','Rural']
     },
     tooltip: {
@@ -95,7 +82,7 @@
     },
     xAxis: {
       type: 'category', data: years, name: 'Año',
-      nameLocation: 'middle', nameGap: 22,
+      nameLocation: 'middle', nameGap: 18,
       axisLabel:{ fontSize: 11 }, axisTick:{alignWithLabel:true}
     },
     yAxis: {
@@ -118,8 +105,11 @@
         emphasis:{ focus:'series' }
       }
     ]
-  };
-  chart.setOption(baseOption);
+  });
+
+  // Redimensiona al tamaño del iframe sin generar scroll
+  const resize = () => chart.resize();
+  window.addEventListener('resize', resize, { passive:true });
 
   // ===== Carga + animación =====
   try{
@@ -143,10 +133,9 @@
 
   }catch(e){
     console.error(e);
-    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    showErr("Error: " + (e && e.message ? e.message : e));
   }
 })();
 </script>
 </body>
 </html>
-
