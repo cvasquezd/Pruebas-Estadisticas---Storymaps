@@ -3,25 +3,32 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Distribución del déficit cualitativo por área de residencia</title>
+  <title>Distribución del déficit por área (compacto)</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     :root{
       --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
-      --shadow:0 4px 20px rgba(0,0,0,.08);
+      --shadow:0 3px 12px rgba(0,0,0,.07);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
-    h1{font-weight:700;font-size:20px;margin:0 0 10px}
-    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
-    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
-    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+    /* Layout compacto para panel de Story Map */
+    #wrap{max-width:760px;margin:6px auto;padding:0 8px}
+    #chart{
+      height:320px;           /* ajusta aquí si lo necesitas (280–360px) */
+      min-height:260px;
+      background:var(--card);
+      border-radius:12px;
+      box-shadow:var(--shadow)
+    }
+    #err{margin-top:6px;color:#b91c1c;font-size:11px;white-space:pre-wrap}
+    @media (max-width:480px){
+      #wrap{padding:0 6px}
+      #chart{height:300px;min-height:250px}
+    }
   </style>
 </head>
 <body>
 <div id="wrap">
-  <h1>Distribución del déficit cuantitativo por área de residencia</h1>
-  <p class="sub">Fuente: ArcGIS FeatureServer (vw_story_indicador_vivienda_03 · capa 6) · cod_var = 48 · NACIONAL</p>
   <div id="chart"></div>
   <div id="err"></div>
 </div>
@@ -54,18 +61,12 @@
       .filter(r => r && r.anio != null)
       .sort((a,b) => Number(a.anio) - Number(b.anio))
       .map(r => {
-        // valores originales (ej. 78.97 y 21.03)
         let u = +Number(r.porcentaje_urbano ?? 0);
         let rr = +Number(r.porcentaje_rural ?? 0);
-        // si no suman aprox 100, normalizamos
         const s = u + rr;
-        if (s > 0 && (s < 99 || s > 101)) {
-          u = u / s * 100;
-          rr = rr / s * 100;
-        }
+        if (s > 0 && (s < 99 || s > 101)) { u = u / s * 100; rr = rr / s * 100; }
         return { anio: String(r.anio), u: +u.toFixed(2), r: +rr.toFixed(2) };
       });
-
     return rows;
   }
 
@@ -77,14 +78,14 @@
   const baseOption = {
     backgroundColor: '#ffffff',
     color: ['#5470C6', '#22C55E'], // Urbano, Rural
-    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    grid: { left: 48, right: 12, top: 28, bottom: 36, containLabel: true }, // márgenes compactos
     legend: {
-      top: 8, left: 'center', selectedMode: false,
-      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
-      textStyle: { fontSize: 12 }, data: ['Urbano','Rural']
+      top: 6, left: 'center', selectedMode: false,
+      itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+      textStyle: { fontSize: 11 }, data: ['Urbano','Rural']
     },
     tooltip: {
-      trigger: 'axis', axisPointer: { type: 'shadow' },
+      trigger: 'axis', axisPointer: { type: 'shadow' }, confine: true,
       formatter: (ps) => {
         const y = ps?.[0]?.axisValueLabel || '';
         const lines = [`<b>${y}</b>`];
@@ -92,20 +93,28 @@
         return lines.join('<br/>');
       }
     },
-    xAxis: { type: 'category', data: years, name: 'Año', nameLocation: 'middle', nameGap: 28, axisTick:{alignWithLabel:true} },
-    yAxis: { type: 'value', min:0, max:100, axisLabel:{ formatter: '{value}%' }, splitLine:{show:true} },
+    xAxis: {
+      type: 'category', data: years, name: 'Año',
+      nameLocation: 'middle', nameGap: 22,
+      axisLabel:{ fontSize: 11 }, axisTick:{alignWithLabel:true}
+    },
+    yAxis: {
+      type: 'value', min:0, max:100,
+      axisLabel:{ formatter: '{value}%', fontSize: 11 },
+      splitLine:{show:true}
+    },
     animation: true,
     series: [
       {
         name:'Urbano', type:'bar', stack:'total', barWidth:'60%',
         data: urbano,
-        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
         emphasis:{ focus:'series' }
       },
       {
         name:'Rural', type:'bar', stack:'total', barWidth:'60%',
         data: rural,
-        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%` },
+        label:{ show:true, position:'inside', formatter:(p)=> `${(+p.value).toFixed(1)}%`, fontSize: 10 },
         emphasis:{ focus:'series' }
       }
     ]
@@ -118,7 +127,6 @@
     if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
     let i = 0;
-    // agrega el primer año y arranca
     years.push(rows[0].anio);
     urbano.push(rows[0].u);
     rural.push(rows[0].r);
@@ -141,3 +149,4 @@
 </script>
 </body>
 </html>
+
