@@ -3,54 +3,43 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Déficit Habitacional (%) Total - Urbano - Rural</title>
+  <title>Déficit Cuantitativo ENAHO (%) — compacto</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
-    :root{
-      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
-      --shadow:0 4px 20px rgba(0,0,0,.08);
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    /* Ocupa todo el panel del Story Map */
+    #chart{width:100%;height:100%}
+    /* Error flotante (no provoca scroll) */
+    #err{
+      position:absolute;left:6px;bottom:6px;display:none;
+      background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;
+      padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap
     }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
-    h1{font-weight:700;font-size:20px;margin:0 0 10px}
-    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
-    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
-    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
   </style>
 </head>
 <body>
-<div id="wrap">
-  <h1>Déficit Cuantitativo ENAHO(%) Total - Urbano - Rural</h1>
-  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
   <div id="chart"></div>
   <div id="err"></div>
-</div>
 
 <script>
 (async function(){
-  // === 1) CONFIGURA TU SERVICIO =============================================
+  // === Servicio / filtros ====================================================
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
   const WHERE = "cod_var = 46 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
 
-  // Eje X fijo (estático)
   const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
 
-  // 🎨 COLORES (MODIFICA AQUÍ)
-  const COLORS = {
-    total : "#0ea5e9",  // azul
-    urbano: "#22c55e",  // verde
-    rural : "#ef4444"   // rojo
-  };
+  const COLORS = { total:"#0ea5e9", urbano:"#22c55e", rural:"#ef4444" };
 
   const $err = document.getElementById('err');
   const chart = echarts.init(document.getElementById('chart'));
-  window.addEventListener('resize', () => chart.resize());
+  window.addEventListener('resize', () => chart.resize(), { passive:true });
 
-  // Índice por año para tooltip
   const byYear = Object.create(null);
 
-  // --- utilidades ---
-  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  const qs = (url, params)=> url + "?" + new URLSearchParams(params).toString();
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
 
   async function fetchRows(){
     const url = qs(SERVICE_URL, {
@@ -61,9 +50,9 @@
       f: "json"
     });
     const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) throw new Error("HTTP " + res.status + " — " + url);
+    if(!res.ok) throw new Error("HTTP " + res.status);
     const json = await res.json();
-    if(json.error) throw new Error((json.error.message||"Error del servicio") + " — " + url);
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
     const rows = (json.features || []).map(f => f.attributes);
     return rows
       .filter(r => r && r.anio != null)
@@ -80,7 +69,6 @@
     for(let i=0;i<arr.length;i++){ const v=arr[i]; if(v!=null && isFinite(v)) return i; }
     return -1;
   }
-  // Construye una "línea semilla": mantiene nulos antes del 1er dato y, desde ahí, repite el 1er valor.
   function makeSeed(arr){
     const idx = firstValidIndex(arr);
     if(idx < 0) return arr.slice();
@@ -88,30 +76,29 @@
     return arr.map((v,i)=> i < idx ? null : v0);
   }
 
-  // --- configuración base ---
-  const baseOption = {
+  chart.setOption({
     backgroundColor: '#ffffff',
     color: [COLORS.total, COLORS.urbano, COLORS.rural],
-    grid: { left: 60, right: 24, top: 50, bottom: 50, containLabel: true },
+    /* más espacio para la leyenda, compacto sin scroll */
+    grid: { left: 54, right: 12, top: 54, bottom: 30, containLabel: true },
     legend: {
       top: 8, left: 'center',
-      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
-      textStyle: { fontSize: 12 },
+      itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+      textStyle: { fontSize: 11 },
       data: ['Total (%)','Urbano (%)','Rural (%)']
     },
     tooltip: {
-      trigger: 'axis',
+      trigger: 'axis', confine: true,
       axisPointer: { type: 'line' },
       formatter: function (params) {
-        const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
+        const year = params?.[0]?.axisValue ?? '';
         const row = byYear[year];
         const cfg = [
           { name: 'Total (%)',  key: 'total'  },
           { name: 'Urbano (%)', key: 'urbano' },
           { name: 'Rural (%)',  key: 'rural'  }
         ];
-        const markers = {};
-        (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const markers = {}; (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
         const dotGray = '<span style="display:inline-block;margin-right:4px;border-radius:50%;width:10px;height:10px;background:#ccc"></span>';
         const lines = [`<b>${year}</b>`];
         cfg.forEach(c => {
@@ -127,21 +114,22 @@
       type: 'category',
       boundaryGap: false,
       data: YEARS,
-      name: 'Año', nameLocation: 'middle', nameGap: 28,
+      name: 'Año', nameLocation: 'middle', nameGap: 20,
+      axisLabel: { fontSize: 11 },
       axisTick: { alignWithLabel: true },
       animation: false
     },
     yAxis: {
       type: 'value',
       name: '%',
-      nameTextStyle: { padding: [0,0,0,-4] },
-      axisLabel: { formatter: '{value}%' },
+      nameTextStyle: { padding: [0,0,0,-4], fontSize: 11 },
+      axisLabel: { formatter: '{value}%', fontSize: 11 },
       splitLine: { show: true },
       scale: true
     },
-    animationDuration: 1200,
+    animationDuration: 900,
     animationEasing: 'linear',
-    animationDurationUpdate: 800,
+    animationDurationUpdate: 600,
     series: [
       {
         name:'Total (%)', type:'line',
@@ -150,7 +138,7 @@
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.total },
         itemStyle:{ color: COLORS.total },
-        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
+        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6, fontSize:10 }
       },
       {
         name:'Urbano (%)', type:'line',
@@ -159,7 +147,7 @@
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.urbano },
         itemStyle:{ color: COLORS.urbano },
-        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
+        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6, fontSize:10 }
       },
       {
         name:'Rural (%)', type:'line',
@@ -168,12 +156,11 @@
         showSymbol:true, symbol:'circle', symbolSize:6,
         lineStyle:{ width:2, color: COLORS.rural },
         itemStyle:{ color: COLORS.rural },
-        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6 }
+        label:{ show:false, formatter: p => (p.value==null?'':(+p.value).toFixed(2)+'%'), position:'top', distance:6, fontSize:10 }
       }
     ]
-  };
+  });
 
-  chart.setOption(baseOption);
   chart.showLoading('default', { text:'Cargando…' });
 
   let labelsShown = false;
@@ -183,74 +170,46 @@
     chart.hideLoading();
 
     if (!all.length) {
-      $err.textContent = "No se recibieron registros para el filtro solicitado.\nFiltro: " + WHERE;
+      showErr("No se recibieron registros para el filtro solicitado.");
       return;
     }
 
-    // Índice por año
     all.forEach(r => byYear[r.anio] = r);
 
-    // Datos reales alineados al eje fijo
     const totalData  = YEARS.map(y => (byYear[y] ? byYear[y].total  : null));
     const urbanoData = YEARS.map(y => (byYear[y] ? byYear[y].urbano : null));
     const ruralData  = YEARS.map(y => (byYear[y] ? byYear[y].rural  : null));
 
-    // Líneas semilla (planas a partir del primer dato de cada serie)
     const seedTotal  = makeSeed(totalData);
     const seedUrbano = makeSeed(urbanoData);
-    const seedRural  = makeSeed(ruralData);  // <- evita el “caer” de Rural
+    const seedRural  = makeSeed(ruralData);
 
-    // Ajuste de eje Y (si hay valores válidos)
     const vals = [...totalData, ...urbanoData, ...ruralData].filter(v => v!=null && isFinite(v));
-    const opt = {};
-    if (vals.length > 0) {
+    if (vals.length) {
       const minVal = Math.min(...vals);
       const maxVal = Math.max(...vals);
       const pad = Math.max((maxVal - minVal) * 0.08, 0.5);
-      opt.yAxis = { min: Math.floor(minVal - pad), max: Math.ceil(maxVal + pad) };
+      chart.setOption({ yAxis: { min: Math.floor(minVal - pad), max: Math.ceil(maxVal + pad) }});
     }
 
-    // 1) Pintamos semillas SIN animación (todo plano desde el primer dato)
-    chart.setOption({
-      ...opt,
-      series: [
-        { data: seedTotal  },
-        { data: seedUrbano },
-        { data: seedRural  }
-      ]
-    }, { notMerge:false, lazyUpdate:false });
-
-    // 2) En el siguiente frame, actualizamos a los datos reales CON animación
+    chart.setOption({ series: [ {data:seedTotal}, {data:seedUrbano}, {data:seedRural} ] });
     requestAnimationFrame(() => {
-      chart.setOption({
-        series: [
-          { data: totalData  },
-          { data: urbanoData },
-          { data: ruralData  }
-        ]
-      });
+      chart.setOption({ series: [ {data:totalData}, {data:urbanoData}, {data:ruralData} ] });
     });
 
-    // Mostrar etiquetas al terminar la animación inicial
     chart.off('finished');
     chart.on('finished', () => {
-      if (labelsShown) return;
-      labelsShown = true;
-      chart.setOption({
-        series: [
-          { label:{ show:true } },
-          { label:{ show:true } },
-          { label:{ show:true } }
-        ]
-      });
+      if (labelsShown) return; labelsShown = true;
+      chart.setOption({ series: [ {label:{show:true}}, {label:{show:true}}, {label:{show:true}} ] });
     });
 
   }catch(e){
     chart.hideLoading();
     console.error(e);
-    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    showErr("Error: " + (e && e.message ? e.message : e));
   }
 })();
 </script>
 </body>
 </html>
+
