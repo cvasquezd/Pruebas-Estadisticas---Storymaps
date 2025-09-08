@@ -3,31 +3,24 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Déficit Habitacional totales (2017–2024)</title>
+  <title>Déficit Habitacional totales (%) — compacto</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
-    :root{
-      --bg:#ffffff;
-      --fg:#111827;
-      --muted:#6b7280;
-      --card:#fafafa;
-      --shadow:0 4px 20px rgba(0,0,0,.08);
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    /* El gráfico llena todo el panel/iframe del Story Map */
+    #chart{width:100%;height:100%}
+    /* Mensaje de error flotante (no empuja el layout) */
+    #err{
+      position:absolute;left:6px;bottom:6px;display:none;
+      background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;
+      padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap
     }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
-    h1{font-weight:700;font-size:20px;margin:0 0 10px}
-    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
-    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
-    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
   </style>
 </head>
 <body>
-<div id="wrap">
-  <h1>Déficit Habitacional totales (2017–2024)</h1>
-  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code></p>
   <div id="chart"></div>
   <div id="err"></div>
-</div>
 
 <script>
 (async function(){
@@ -39,7 +32,7 @@
   const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
   const CODS  = [45, 46, 47];
 
-  // 🎨 NOMBRES Y COLORES (MODIFICA AQUÍ)
+  // 🎨 NOMBRES Y COLORES
   const NAMES = {
     45: "Déficit Habitacional",
     46: "Déficit Cuantitativo",
@@ -49,11 +42,10 @@
 
   // === 2) UTILIDADES =========================================================
   const $err = document.getElementById('err');
-  function qs(url, params){
-    return url + "?" + new URLSearchParams(params).toString();
-  }
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
 
-  // ⬇️ Cambiado a porcentaje_total
+  // Lee porcentaje_total (valores como 84.5 → mostrar 84.5%)
   async function fetchRows(){
     const WHERE = `region_nombre='${REGION}' AND cod_var IN (${CODS.join(",")}) AND anio BETWEEN ${YEARS[0]} AND ${YEARS[YEARS.length-1]}`;
     const url = qs(SERVICE_URL, {
@@ -73,36 +65,35 @@
       .map(r => ({
         anio: String(r.anio),
         cod : Number(r.cod_var),
-        val : Number(r.porcentaje_total ?? 0) // p.ej. 84.5 -> mostrar 84.5%
+        val : Number(r.porcentaje_total ?? 0)
       }));
   }
 
   // === 3) INICIA EL CHART ====================================================
   const chart = echarts.init(document.getElementById('chart'));
-  window.addEventListener('resize', () => chart.resize());
+  window.addEventListener('resize', () => chart.resize(), { passive:true });
 
   // Estructura: por año y cod_var -> valor
   const byYearCod = Object.create(null); // { '2017': {45: v, 46: v, 47: v}, ... }
 
-  const baseOption = {
+  chart.setOption({
     backgroundColor: '#ffffff',
     color: CODS.map(c => COLORS[c]),
-    grid: { left: 70, right: 24, top: 54, bottom: 56, containLabel: true },
+    /* Compacto y con espacio para la leyenda */
+    grid: { left: 54, right: 12, top: 54, bottom: 30, containLabel: true },
     legend: {
       top: 8, left: 'center',
-      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
-      textStyle: { fontSize: 12 },
+      itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+      textStyle: { fontSize: 11 },
       data: CODS.map(c => NAMES[c] || `cod_var ${c}`)
     },
     tooltip: {
-      trigger: 'axis',
+      trigger: 'axis', confine: true,
       axisPointer: { type: 'line' },
-      // ⬇️ Formatea como porcentaje con 2 decimales
       formatter: function (params) {
         const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
         const row = byYearCod[year] || {};
-        const markers = {};
-        (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const markers = {}; (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
         const lines = [`<b>${year}</b>`];
         CODS.forEach(c => {
           const name = NAMES[c] || `cod_var ${c}`;
@@ -120,20 +111,21 @@
       data: YEARS,
       name: 'Año',
       nameLocation: 'middle',
-      nameGap: 30,
+      nameGap: 20,
       axisTick: { alignWithLabel: true },
+      axisLabel: { fontSize: 11 },
       animation: false
     },
     yAxis: {
       type: 'value',
-      name: '%',                         // ⬅️ Cambiado a porcentaje
-      nameTextStyle: { padding: [0,0,0,-6] },
-      axisLabel: { formatter: (v)=> (Math.round(v*100)/100) + '%' }, // ⬅️ % en eje
+      name: '%',
+      nameTextStyle: { padding: [0,0,0,-6], fontSize: 11 },
+      axisLabel: { fontSize: 11, formatter: v => (Math.round(v*100)/100) + '%' },
       splitLine: { show: true },
       scale: true
     },
     animation: true,
-    animationDuration: 1200,
+    animationDuration: 900,
     animationEasing: 'linear',
     animationDurationUpdate: 600,
     series: CODS.map(c => ({
@@ -143,17 +135,14 @@
       showSymbol: true, symbol: 'circle', symbolSize: 6,
       lineStyle: { width: 2, color: COLORS[c] },
       itemStyle: { color: COLORS[c] },
-      // ⬇️ Etiquetas con %
       label: {
         show: false,
         formatter: (p) => (p.value==null ? '' : (+p.value).toFixed(2) + '%'),
-        position: 'top', distance: 6
+        position: 'top', distance: 6, fontSize: 10
       },
-      data: YEARS.map(() => null) // se completa luego
+      data: YEARS.map(() => null)
     }))
-  };
-
-  chart.setOption(baseOption);
+  });
 
   // === 4) CARGA, ALINEA Y DIBUJA ============================================
   let labelsShown = false;
@@ -162,14 +151,12 @@
     const rows = await fetchRows();
     if (!rows.length) throw new Error("No se recibieron registros para el filtro solicitado.");
 
-    // Indexar por año y cod_var
     YEARS.forEach(y => { byYearCod[y] = {}; });
     rows.forEach(r => {
       if (!byYearCod[r.anio]) byYearCod[r.anio] = {};
       byYearCod[r.anio][r.cod] = r.val;
     });
 
-    // Construir data por serie alineada al eje fijo
     const seriesData = {};
     CODS.forEach(c => {
       seriesData[c] = YEARS.map(y => {
@@ -178,32 +165,29 @@
       });
     });
 
-    // Calcular min/max para dar "aire" vertical
     const vals = CODS.flatMap(c => seriesData[c]).filter(v => v!=null && isFinite(v));
-    const minVal = Math.min(...vals);
-    const maxVal = Math.max(...vals);
-    const pad = Math.max((maxVal - minVal) * 0.08, Math.max(1, Math.round(maxVal*0.01))); // 8% o 1% del máx
+    if (vals.length) {
+      const minVal = Math.min(...vals);
+      const maxVal = Math.max(...vals);
+      const pad = Math.max((maxVal - minVal) * 0.08, 1); // al menos 1 punto %
+      chart.setOption({ yAxis: { min: Math.floor(minVal - pad), max: Math.ceil(maxVal + pad) } });
+    }
 
-    chart.setOption({
-      yAxis: { min: Math.max(0, Math.floor(minVal - pad)), max: Math.ceil(maxVal + pad) },
-      series: CODS.map(c => ({ data: seriesData[c] }))
-    });
+    chart.setOption({ series: CODS.map(c => ({ data: seriesData[c] })) });
 
-    // Mostrar etiquetas al finalizar la animación inicial
     chart.off('finished');
     chart.on('finished', () => {
       if (labelsShown) return;
       labelsShown = true;
-      chart.setOption({
-        series: CODS.map(c => ({ label: { show: true } }))
-      });
+      chart.setOption({ series: CODS.map(() => ({ label: { show: true } })) });
     });
 
   }catch(e){
     console.error(e);
-    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    showErr("Error: " + (e && e.message ? e.message : e));
   }
 })();
 </script>
 </body>
 </html>
+
