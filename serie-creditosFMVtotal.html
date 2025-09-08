@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Créditos FMV (recuento) 2017–2024</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:20px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 10px}
+    .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+    #chart{height:70vh;min-height:480px;background:var(--card);border-radius:16px;box-shadow:var(--shadow)}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Créditos FMV (recuento) 2017–2024</h1>
+  <p class="sub">Fuente: ArcGIS FeatureServer · Tabla 6: <code>vw_story_indicador_vivienda_03</code> · cod_var=69</p>
+  <div id="chart"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  // === 1) CONFIGURA TU SERVICIO =============================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const WHERE = "cod_var = 69 AND region_nombre = 'NACIONAL' AND anio BETWEEN 2017 AND 2024";
+
+  // Eje X fijo (estático)
+  const YEARS = ["2017","2018","2019","2020","2021","2022","2023","2024"];
+
+  // 🎨 COLOR DE LA SERIE
+  const COLOR = "#0ea5e9"; // azul
+
+  // === 2) UTILIDADES =========================================================
+  const $err = document.getElementById('err');
+  function qs(url, params){
+    return url + "?" + new URLSearchParams(params).toString();
+  }
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,recuento_total",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    const rows = (json.features || []).map(f => f.attributes);
+    return rows
+      .filter(r => r && r.anio != null)
+      .sort((a,b) => Number(a.anio) - Number(b.anio))
+      .map(r => ({
+        anio: String(r.anio),
+        val : Number(r.recuento_total ?? 0) // Créditos FMV (recuento)
+      }));
+  }
+
+  // === 3) INICIA EL CHART ====================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize());
+
+  // Índice por año
+  const byYear = Object.create(null);
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    color: [COLOR],
+    grid: { left: 70, right: 24, top: 54, bottom: 56, containLabel: true },
+    legend: {
+      top: 8, left: 'center',
+      itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+      textStyle: { fontSize: 12 },
+      data: ['Créditos FMV']
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: function (params) {
+        const year = params?.[0]?.axisValue ?? params?.[0]?.axisValueLabel ?? '';
+        const row = byYear[year];
+        const marker = params?.[0]?.marker || '';
+        const val = row && isFinite(row.val) ? new Intl.NumberFormat('es-PE').format(row.val) : '—';
+        return `<b>${year}</b><br/>${marker} Créditos FMV: <b>${val}</b>`;
+      }
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: YEARS,
+      name: 'Año',
+      nameLocation: 'middle',
+      nameGap: 30,
+      axisTick: { alignWithLabel: true },
+      animation: false
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Créditos FMV',
+      nameTextStyle: { padding: [0,0,0,-6] },
+      axisLabel: {
+        formatter: function(v){ return new Intl.NumberFormat('es-PE', { notation:'compact' }).format(v); }
+      },
+      splitLine: { show: true },
+      scale: true
+    },
+    animation: true,
+    animationDuration: 1200,
+    animationEasing: 'linear',
+    animationDurationUpdate: 600,
+    series: [
+      {
+        name:'Créditos FMV',
+        type:'line',
+        smooth:true,
+        showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color: COLOR },
+        itemStyle:{ color: COLOR },
+        label:{
+          show:false,
+          formatter: (p)=> (p.value==null ? '' : new Intl.NumberFormat('es-PE').format(+p.value)),
+          position:'top', distance:6
+        },
+        data: YEARS.map(() => null) // se completa luego
+      }
+    ]
+  };
+
+  chart.setOption(baseOption);
+
+  // === 4) CARGA Y DIBUJA =====================================================
+  let labelsShown = false;
+
+  try{
+    const all = await fetchRows();
+    if (!all.length) throw new Error("No se recibieron registros para el filtro solicitado.");
+
+    // Índice por año
+    all.forEach(r => byYear[r.anio] = r);
+
+    // Datos alineados al eje fijo
+    const serieData = YEARS.map(y => (byYear[y] ? byYear[y].val : null));
+
+    // Ajuste de eje Y para más "aire"
+    const vals = serieData.filter(v => v!=null && isFinite(v));
+    if (vals.length){
+      const minVal = Math.min(...vals);
+      const maxVal = Math.max(...vals);
+      const pad = Math.max((maxVal - minVal) * 0.08, Math.max(1, Math.round(maxVal*0.01))); // 8% o 1% del máx
+      chart.setOption({ yAxis: { min: Math.max(0, Math.floor(minVal - pad)), max: Math.ceil(maxVal + pad) } });
+    }
+
+    chart.setOption({ series: [ { data: serieData } ] });
+
+    // Mostrar etiquetas al final de la animación
+    chart.off('finished');
+    chart.on('finished', () => {
+      if (labelsShown) return;
+      labelsShown = true;
+      chart.setOption({ series: [ { label: { show: true } } ] });
+    });
+
+  }catch(e){
+    console.error(e);
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>
