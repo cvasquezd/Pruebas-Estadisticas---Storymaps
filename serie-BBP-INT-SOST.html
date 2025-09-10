@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>BBP — compacto</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #chart{width:100%;height:100%}
+    #err{
+      position:absolute;left:6px;bottom:6px;display:none;
+      background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;
+      padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap
+    }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <div id="err"></div>
+
+<script>
+(async function(){
+  // === Servicio / filtros =====================================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const REGION = "NACIONAL";
+  const CODS  = [72, 75, 77]; // 72: BBP, 75: BBP SOSTENIBLE, 77: BBP INTEGRADOR
+  const YEARS = ["2018","2019","2020","2021","2022","2023","2024"];
+
+  const NAMES  = { 72: "BBP", 75: "BBP SOSTENIBLE", 77: "BBP INTEGRADOR" };
+  const COLORS = { 72: "#0ea5e9", 75: "#22c55e", 77: "#f59e0b" };
+
+  const $err = document.getElementById('err');
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
+  const qs = (url, params)=> url + "?" + new URLSearchParams(params).toString();
+
+  async function fetchRows(){
+    const WHERE = `region_nombre='${REGION}' AND cod_var IN (${CODS.join(",")}) AND anio BETWEEN ${YEARS[0]} AND ${YEARS[YEARS.length-1]}`;
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,cod_var,recuento_total",
+      orderByFields: "anio ASC, cod_var ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    return (json.features || [])
+      .map(f => f.attributes)
+      .filter(r => r && r.anio != null && r.cod_var != null)
+      .map(r => ({ anio: String(r.anio), cod: Number(r.cod_var), val: Number(r.recuento_total ?? 0) }));
+  }
+
+  // === Chart base =============================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', () => chart.resize(), { passive:true });
+
+  const byYearCod = Object.create(null); // { '2018': {72: v, 75: v, 77: v}, ... }
+
+  chart.setOption({
+    backgroundColor: '#ffffff',
+    color: CODS.map(c => COLORS[c]),
+    grid: { left: 54, right: 12, top: 54, bottom: 30, containLabel: true },
+    legend: {
+      top: 8, left: 'center',
+      itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+      textStyle: { fontSize: 11 },
+      data: CODS.map(c => NAMES[c])
+    },
+    tooltip: {
+      trigger: 'axis', confine: true,
+      axisPointer: { type: 'line' },
+      formatter: function (params) {
+        const year = params?.[0]?.axisValue ?? '';
+        const row = byYearCod[year] || {};
+        const markers = {}; (params || []).forEach(p => { markers[p.seriesName] = p.marker; });
+        const lines = [`<b>${year}</b>`];
+        CODS.forEach(c => {
+          const name = NAMES[c];
+          const v = row[c];
+          const val = (v==null || !isFinite(v)) ? '—' : new Intl.NumberFormat('es-PE').format(v);
+          const m = markers[name] || '';
+          lines.push(`${m} ${name}: <b>${val}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: YEARS,
+      name: 'Año', nameLocation: 'middle', nameGap: 20,
+      axisTick: { alignWithLabel: true },
+      axisLabel: { fontSize: 11 },
+      animation: false
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Recuento',
+      nameTextStyle: { padding: [0,0,0,-6], fontSize: 11 },
+      axisLabel: {
+        fontSize: 11,
+        formatter: v => new Intl.NumberFormat('es-PE', { notation:'compact' }).format(v)
+      },
+      splitLine: { show: true },
+      scale: true
+    },
+    animation: true,
+    animationDuration: 900,
+    animationEasing: 'linear',
+    animationDurationUpdate: 600,
+    series: CODS.map(c => ({
+      name: NAMES[c],
+      type: 'line',
+      smooth: true,
+      showSymbol: true, symbol: 'circle', symbolSize: 6,
+      lineStyle: { width: 2, color: COLORS[c] },
+      itemStyle: { color: COLORS[c] },
+      label: {
+        show: false,
+        formatter: (p) => (p.value==null ? '' : new Intl.NumberFormat('es-PE').format(+p.value)),
+        position: 'top', distance: 6, fontSize: 10
+      },
+      data: YEARS.map(() => null)
+    }))
+  });
+
+  chart.showLoading('default', { text:'Cargando…' });
+
+  try{
+    const rows = await fetchRows();
+    chart.hideLoading();
+    if (!rows.length) { showErr("No se recibieron registros para el filtro solicitado."); return; }
+
+    // Indexar
+    YEARS.forEach(y => { byYearCod[y] = {}; });
+    rows.forEach(r => {
+      if (!byYearCod[r.anio]) byYearCod[r.anio] = {};
+      byYearCod[r.anio][r.cod] = r.val;
+    });
+
+    // Construir data por serie
+    const seriesData = {};
+    CODS.forEach(c => {
+      seriesData[c] = YEARS.map(y => {
+        const v = byYearCod[y] ? byYearCod[y][c] : null;
+        return (v==null || !isFinite(v)) ? null : +v;
+      });
+    });
+
+    // Ajuste Y con padding
+    const vals = CODS.flatMap(c => seriesData[c]).filter(v => v!=null && isFinite(v));
+    if (vals.length){
+      const minVal = Math.min(...vals);
+      const maxVal = Math.max(...vals);
+      const pad = Math.max((maxVal - minVal) * 0.08, Math.max(1, Math.round(maxVal*0.01)));
+      chart.setOption({ yAxis: { min: Math.max(0, Math.floor(minVal - pad)), max: Math.ceil(maxVal + pad) } });
+    }
+
+    chart.setOption({ series: CODS.map(c => ({ data: seriesData[c] })) });
+
+    // Mostrar etiquetas tras animación inicial
+    let labelsShown = false;
+    chart.off('finished');
+    chart.on('finished', () => {
+      if (labelsShown) return;
+      labelsShown = true;
+      chart.setOption({ series: CODS.map(() => ({ label: { show: true } })) });
+    });
+
+  }catch(e){
+    chart.hideLoading();
+    console.error(e);
+    showErr("Error: " + (e && e.message ? e.message : e));
+  }
+})();
+</script>
+</body>
+</html>
