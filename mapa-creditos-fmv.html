@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Número de Créditos MiVivienda — ajustes según guía</title>
+<title>Mapa MiVivienda (sin título)</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
   html,body{margin:0;background:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  /* Altura pensada para StoryMap; ajusta si lo necesitas */
   #chart{width:100%;height:940px}
   #err{position:fixed;left:10px;bottom:10px;display:none;background:#fff;border:1px solid #fecaca;color:#b91c1c;
        padding:8px 10px;border-radius:8px;font-size:12px;max-width:min(560px,92%);white-space:pre-wrap}
@@ -21,16 +22,13 @@
   const SERVICE   = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer";
   const LYR_LIMIT = 1, TBL_VAL = 6, COD_VAR = 70, YEAR = 2024;
 
-  // Columnas rígidas
   const COL_LEFT_PCT  = 0.18;
   const COL_RIGHT_PCT = 0.84;
 
-  // Puntos (anclajes dentro del polígono) — AJUSTES marcados
   const POINT_SHIFT = {
     "TUMBES":[0,-3],
     "PIURA":[-14,-2],
     "LAMBAYEQUE":[-14, 8],
-    // ↓ Bajé el punto para que la vertical quede dentro
     "CAJAMARCA":[-5,-40],
     "LA LIBERTAD":[-12, 4],
     "ANCASH":[-18, 0],
@@ -38,7 +36,6 @@
     "CALLAO":[2,-4],
     "HUANCAVELICA":[-10,10],
     "ICA":[-20,-10],
-    // ↓ Sube un poco manteniéndose dentro
     "AYACUCHO":[-4,20],
     "AREQUIPA":[10,0],
     "MOQUEGUA":[-8,16],
@@ -46,19 +43,16 @@
     "CUSCO":[16,16],
     "APURIMAC":[0,5],
     "PUNO":[0,5],
-    // ↓ Más a la izquierda y un poco arriba (dentro del polígono)
     "MADRE DE DIOS":[0,20],
     "JUNIN":[8,5],
     "PASCO":[-8,-8],
     "HUANUCO":[-10,-10],
-    // ↓ Más a la izquierda (dentro del polígono)
     "UCAYALI":[-30,-50],
     "SAN MARTIN":[10,2],
     "AMAZONAS":[-10,20],
     "LORETO":[42,-8]
   };
 
-  // Columnas (paralelas) y único vertical
   const RIGHT_COL = new Set([
     "LORETO","AMAZONAS","SAN MARTIN","UCAYALI","HUANUCO","PASCO","JUNIN",
     "MADRE DE DIOS","CUSCO","APURIMAC","PUNO","TACNA"
@@ -67,11 +61,8 @@
     "TUMBES","PIURA","LAMBAYEQUE","LA LIBERTAD","ANCASH",
     "LIMA","CALLAO","HUANCAVELICA","ICA","AYACUCHO","AREQUIPA","MOQUEGUA"
   ]);
-  const SPECIAL_VERTICAL = "CAJAMARCA";
-  // ↓ Vertical un poco más corta para garantizar que no salga del polígono
   const CAJ_VERTICAL_UP = 120;
 
-  // Utils
   const qs=(u,p)=>u+"?"+new URLSearchParams(p).toString();
   const nf=v=>new Intl.NumberFormat('es-PE').format(v||0);
   const N=s=>(s||"").toUpperCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
@@ -128,8 +119,7 @@
   echarts.registerMap('peru', geojson, {});
   chart.setOption({
     backgroundColor:'#fff',
-    title:{ text:`NÚMERO DE CRÉDITOS MIVIVIENDA POR DEPARTAMENTO — ${YEAR}`, top:8, left:'center',
-            textStyle:{fontSize:18,fontWeight:700} },
+    // 👇 Título eliminado
     tooltip:{ show:false },
     geo:{
       map:'peru', roam:false, silent:true, label:{show:false}, emphasis:{disabled:true},
@@ -197,3 +187,4 @@
 </script>
 </body>
 </html>
+
