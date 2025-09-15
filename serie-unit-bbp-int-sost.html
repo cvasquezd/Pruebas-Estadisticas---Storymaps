@@ -3,22 +3,21 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>BBP — series separadas</title>
+  <title>BBP — series separadas (ajustado)</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    #wrap{height:100%;width:100%;display:grid;grid-template-rows:1fr 1fr 1fr;gap:8px;padding:8px}
-    .panel{position:relative;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 2px 16px rgba(0,0,0,.04);overflow:hidden}
-    .hdr{position:absolute;inset:auto 10px 10px 10px;display:flex;gap:10px;align-items:center;pointer-events:none}
+    #wrap{height:100%;width:100%;display:grid;grid-template-rows:1fr 1fr 1fr;gap:10px;padding:10px}
+    .panel{position:relative;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.04);overflow:hidden}
+    .hdr{position:absolute;inset:auto 12px 12px 12px;display:flex;gap:10px;align-items:center;pointer-events:none}
     .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#f9fafb;border:1px solid #e5e7eb;font-size:12px}
     .dot{width:10px;height:10px;border-radius:50%}
     .chart{position:absolute;inset:0}
     #err{
-      position:absolute;left:8px;bottom:8px;display:none;
+      position:absolute;left:10px;bottom:10px;display:none;
       background:rgba(255,255,255,.95);color:#b91c1c;font-size:11px;
-      padding:6px 8px;border-radius:6px;max-width:min(780px,92%);white-space:pre-wrap;
-      border:1px solid #fecaca
+      padding:6px 8px;border-radius:6px;max-width:min(780px,92%);white-space:pre-wrap;border:1px solid #fecaca
     }
   </style>
 </head>
@@ -54,10 +53,9 @@
   // === Servicio / filtros =====================================================
   const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
   const REGION = "NACIONAL";
-  const CODS  = [72, 75, 77]; // 72: BBP, 75: BBP SOSTENIBLE, 77: BBP INTEGRADOR
+  const CODS  = [72, 75, 77]; // 72: BBP, 75: SOSTENIBLE, 77: INTEGRADOR
   const YEARS = ["2018","2019","2020","2021","2022","2023","2024"];
 
-  const NAMES  = { 72: "BBP", 75: "BBP SOSTENIBLE", 77: "BBP INTEGRADOR" };
   const COLORS = { 72: "#0ea5e9", 75: "#22c55e", 77: "#f59e0b" };
 
   const $err = document.getElementById('err');
@@ -83,11 +81,12 @@
       .map(r => ({ anio: String(r.anio), cod: Number(r.cod_var), val: Number(r.recuento_total ?? 0) }));
   }
 
-  // === Helpers ECharts ========================================================
+  // === Helpers ECharts (ajustes de ejes/espacios) ============================
   function baseOption(years, yMin, yMax){
     return {
       backgroundColor: '#ffffff',
-      grid: { left: 54, right: 12, top: 14, bottom: 30, containLabel: true },
+      // Más aire alrededor para etiquetas y números
+      grid: { left: 60, right: 30, top: 40, bottom: 48, containLabel: true },
       tooltip: {
         trigger: 'axis', confine: true,
         axisPointer: { type: 'line' },
@@ -100,14 +99,23 @@
       },
       xAxis: {
         type: 'category', boundaryGap: false,
-        data: years, name: 'Año', nameLocation: 'middle', nameGap: 20,
-        axisTick: { alignWithLabel: true }, axisLabel: { fontSize: 11 },
+        data: years,
+        name: 'Año',
+        nameLocation: 'middle',
+        nameGap: 28,                    // separa el nombre del eje
+        axisTick: { alignWithLabel: true },
+        axisLabel: { fontSize: 12, margin: 12 },
         animation: false
       },
       yAxis: {
-        type: 'value', name: 'Recuento',
-        nameTextStyle: { padding: [0,0,0,-6], fontSize: 11 },
-        axisLabel: { fontSize: 11, formatter: v => new Intl.NumberFormat('es-PE', { notation:'compact' }).format(v) },
+        type: 'value',
+        name: 'Recuento',
+        nameTextStyle: { padding: [0,0,0,-6], fontSize: 12 },
+        axisLabel: {
+          fontSize: 12,
+          margin: 12,
+          formatter: v => new Intl.NumberFormat('es-PE', { notation:'compact' }).format(v)
+        },
         splitLine: { show: true },
         scale: true,
         min: yMin, max: yMax
@@ -123,13 +131,15 @@
     return [{
       type: 'line',
       smooth: true,
-      showSymbol: true, symbol: 'diamond', symbolSize: 15,
+      showSymbol: true, symbol: 'diamond', symbolSize: 14, // un poco menor
       lineStyle: { width: 4, color },
       itemStyle: { color },
       label: {
         show: false,
         formatter: (p) => (p.value==null ? '' : new Intl.NumberFormat('es-PE').format(+p.value)),
-        position: 'top', distance: 6, fontSize: 10
+        position: 'top',
+        distance: 12,                  // más separación del punto
+        fontSize: 11
       },
       data: YEARS.map(() => null)
     }];
@@ -156,7 +166,7 @@
       return;
     }
 
-    // Indexar por cod → array de valores en orden de YEARS
+    // Indexar por cod → valores por año
     const byCodYear = { 72: {}, 75: {}, 77: {} };
     rows.forEach(r => { byCodYear[r.cod][r.anio] = r.val; });
 
@@ -168,7 +178,7 @@
       });
     });
 
-    // Unificar escala Y para las tres (comparabilidad)
+    // Unificar escala Y (comparabilidad)
     const vals = CODS.flatMap(c => seriesData[c]).filter(v => v!=null && isFinite(v));
     let yMin = null, yMax = null;
     if (vals.length){
