@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BBP INTEGRADOR — recuento por año</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#fff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  #wrap{height:100%;width:100%;position:relative}
+  #chart{position:absolute;inset:0}
+  .chip{position:absolute;left:8px;bottom:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:999px;
+        padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:8px;pointer-events:none}
+  .dot{width:10px;height:10px;border-radius:50%;background:#f59e0b}
+  #err{position:absolute;left:8px;top:8px;display:none;background:#fff;border:1px solid #fecaca;color:#b91c1c;
+       font-size:11px;padding:6px 8px;border-radius:6px;max-width:min(700px,92%);white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="chart"></div>
+  <div class="chip"><span class="dot"></span><b>BBP INTEGRADOR</b> — recuento por año</div>
+  <div id="err"></div>
+</div>
+
+<script>
+(async function(){
+  const COD = 77, NAME = "BBP INTEGRADOR", COLOR = "#f59e0b";
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  const REGION="NACIONAL";
+  const YEARS = ["2018","2019","2020","2021","2022","2023","2024"];
+
+  const $err = document.getElementById('err');
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
+  const qs=(u,p)=>u+"?"+new URLSearchParams(p).toString();
+  async function fetchRows(){
+    const WHERE = `region_nombre='${REGION}' AND cod_var=${COD} AND anio BETWEEN ${YEARS[0]} AND ${YEARS[YEARS.length-1]}`;
+    const url = qs(SERVICE_URL, {
+      where: WHERE, outFields: "anio,cod_var,recuento_total",
+      orderByFields: "anio ASC", returnGeometry: "false", f: "json"
+    });
+    const r = await fetch(url,{cache:"no-store"}); if(!r.ok) throw new Error("HTTP "+r.status);
+    const j = await r.json(); if(j.error) throw new Error(j.error.message||"Error del servicio");
+    return (j.features||[]).map(f=>f.attributes).map(a=>({anio:String(a.anio),val:Number(a.recuento_total??0)}));
+  }
+
+  const chart = echarts.init(document.getElementById('chart'));
+  function baseOption(yMin,yMax){
+    return {
+      backgroundColor:'#fff',
+      grid:{left:56,right:22,top:18,bottom:42,containLabel:true},
+      tooltip:{trigger:'axis',confine:true,axisPointer:{type:'line'},
+        formatter:(ps)=>{const p=ps?.[0];const y=p?.axisValue??'';const v=(p&&isFinite(p.value))?new Intl.NumberFormat('es-PE').format(+p.value):'—';
+          return `<b>${y}</b><br/>${p?.marker||''} Recuento: <b>${v}</b>`;}
+      },
+      xAxis:{type:'category',boundaryGap:false,data:YEARS,name:'Año',nameLocation:'middle',nameGap:24,
+             axisTick:{alignWithLabel:true},axisLabel:{fontSize:12,margin:10}},
+      yAxis:{type:'value',name:'Recuento',
+             nameTextStyle:{padding:[0,0,0,-6],fontSize:12},
+             axisLabel:{fontSize:12,margin:10,formatter:v=>new Intl.NumberFormat('es-PE',{notation:'compact'}).format(v)},
+             splitLine:{show:true},scale:true,min:yMin,max:yMax},
+      series:[{type:'line',smooth:true,showSymbol:true,symbol:'diamond',symbolSize:12,
+               lineStyle:{width:4,color:COLOR},itemStyle:{color:COLOR},
+               label:{show:false,position:'top',distance:10,fontSize:11,
+                      formatter:(p)=>p.value==null?'':new Intl.NumberFormat('es-PE').format(+p.value)},
+               data:YEARS.map(()=>null)}],
+      animation:true,animationDuration:3000,animationEasing:'linear',animationDurationUpdate:500
+    };
+  }
+  function applyResponsive(){
+    const w=chart.getWidth(), small=w<360;
+    chart.setOption({
+      grid: small?{left:50,right:14,top:12,bottom:38,containLabel:true}:{left:56,right:22,top:18,bottom:42,containLabel:true},
+      xAxis:{axisLabel:{fontSize:small?11:12,margin:small?8:10},nameGap:small?20:24},
+      yAxis:{axisLabel:{fontSize:small?11:12,margin:small?8:10},nameTextStyle:{fontSize:small?11:12}},
+      series:[{symbolSize:small?10:12,label:{show:!small}}]
+    });
+  }
+  window.addEventListener('resize', ()=>{ chart.resize(); applyResponsive(); }, {passive:true});
+
+  chart.showLoading('default',{text:'Cargando…'});
+  try{
+    const rows = await fetchRows();
+    if(!rows.length){ chart.hideLoading(); showErr("No se recibieron registros."); return; }
+    const data = YEARS.map(y=>{ const r = rows.find(x=>x.anio===y); return r?+r.val:null; });
+    const vals = data.filter(v=>v!=null&&isFinite(v));
+    let yMin=null,yMax=null;
+    if(vals.length){
+      const min=Math.min(...vals), max=Math.max(...vals);
+      const pad=Math.max((max-min)*0.08, Math.max(1, Math.round(max*0.01)));
+      yMin=Math.max(0, Math.floor(min-pad)); yMax=Math.ceil(max+pad);
+    }
+    chart.setOption(baseOption(yMin,yMax), true);
+    chart.hideLoading();
+    chart.setOption({series:[{data}]});
+    chart.off('finished'); let shown=false;
+    chart.on('finished', ()=>{ if(shown) return; shown=true; applyResponsive(); });
+  }catch(e){ chart.hideLoading(); console.error(e); showErr("Error: "+(e?.message||e)); }
+})();
+</script>
+</body>
+</html>
