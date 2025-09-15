@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Bono Techo Propio Nacional — recuento</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #chart{width:100%;height:100%}
+    #err{
+      position:absolute;left:6px;bottom:6px;display:none;
+      background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;
+      padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap
+    }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <div id="err"></div>
+
+<script>
+(async function(){
+  // === Servicio / filtro =====================================================
+  const SERVICE_URL = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer/6/query";
+  // Serie solicitada: Bono Techo Propio Nacional
+  const WHERE = "cod_var = 56 AND region_nombre = 'NACIONAL'";
+
+  const SERIES_NAME = "Bono Techo Propio Nacional";
+  const COLOR = "#0ea5e9";
+
+  const $err = document.getElementById('err');
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
+  const qs = (url, params)=> url + "?" + new URLSearchParams(params).toString();
+
+  // Utilidad para generar rango continuo de años [min..max]
+  const yearsRange = (a,b)=>{ const out=[]; for(let y=a;y<=b;y++) out.push(String(y)); return out; };
+
+  async function fetchRows(){
+    const url = qs(SERVICE_URL, {
+      where: WHERE,
+      outFields: "anio,recuento_total",
+      orderByFields: "anio ASC",
+      returnGeometry: "false",
+      f: "json"
+    });
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || "Error del servicio");
+    return (json.features || [])
+      .map(f => f.attributes)
+      .filter(r => r && r.anio != null)
+      .map(r => ({ anio: Number(r.anio), val: Number(r.recuento_total ?? 0) }))
+      .sort((a,b) => a.anio - b.anio);
+  }
+
+  // === Chart ================================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  const byYear = Object.create(null);
+
+  function baseOption(){
+    return {
+      backgroundColor: '#ffffff',
+      color: [COLOR],
+      grid: { left: 56, right: 22, top: 46, bottom: 44, containLabel: true },
+      legend: {
+        top: 8, left: 'center',
+        itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+        textStyle: { fontSize: 12 },
+        data: [SERIES_NAME]
+      },
+      tooltip: {
+        trigger: 'axis', confine: true,
+        axisPointer: { type: 'line' },
+        formatter: function (params) {
+          const year = params?.[0]?.axisValue ?? '';
+          const row = byYear[year];
+          const marker = params?.[0]?.marker || '';
+          const val = row && isFinite(row.val) ? new Intl.NumberFormat('es-PE').format(row.val) : '—';
+          return `<b>${year}</b><br/>${marker} ${SERIES_NAME}: <b>${val}</b>`;
+        }
+      },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        // data se define luego de leer la BD
+        name: 'Año', nameLocation: 'middle', nameGap: 26,
+        axisTick: { alignWithLabel: true },
+        axisLabel: { fontSize: 12, margin: 10 },
+        animation: false
+      },
+      yAxis: {
+        type: 'value',
+        name: 'Recuento',
+        nameTextStyle: { padding: [0,0,0,-6], fontSize: 12 },
+        axisLabel: {
+          fontSize: 12, margin: 10,
+          formatter: v => new Intl.NumberFormat('es-PE', { notation:'compact' }).format(v)
+        },
+        splitLine: { show: true },
+        scale: true
+      },
+      animation: true,
+      animationDuration: 2000,
+      animationEasing: 'linear',
+      animationDurationUpdate: 600,
+      series: [{
+        name: SERIES_NAME,
+        type:'line',
+        // smooth:true, // opcional
+        showSymbol:true, symbol:'circle', symbolSize: 8,
+        lineStyle:{ width: 3, color: COLOR },
+        itemStyle:{ color: COLOR },
+        label:{
+          show:false,
+          formatter: (p)=> (p.value==null ? '' : new Intl.NumberFormat('es-PE').format(+p.value)),
+          position:'top', distance: 12, fontSize: 11
+        },
+        data: [] // se setea tras la carga
+      }]
+    };
+  }
+
+  function applyResponsive(){
+    const w = chart.getWidth();
+    const h = chart.getHeight();
+    const xs = w < 360;
+    const sm = w >= 360 && w < 520;
+
+    chart.setOption({
+      grid: xs
+        ? { left: 50, right: 12, top: 40, bottom: 38, containLabel: true }
+        : sm
+          ? { left: 54, right: 16, top: 44, bottom: 42, containLabel: true }
+          : { left: 56, right: 22, top: 46, bottom: 44, containLabel: true },
+      legend: { textStyle: { fontSize: xs ? 11 : 12 } },
+      xAxis: { axisLabel: { fontSize: xs ? 11 : 12, margin: xs ? 8 : 10 }, nameGap: xs ? 20 : 26 },
+      yAxis: { axisLabel: { fontSize: xs ? 11 : 12, margin: xs ? 8 : 10 }, nameTextStyle: { fontSize: xs ? 11 : 12 } },
+      series: [{ symbolSize: xs ? 6 : sm ? 7 : 8, lineStyle: { width: xs ? 2 : 3 }, label: { show: !xs && h > 220 } }]
+    });
+  }
+
+  chart.setOption(baseOption(), true);
+  chart.showLoading('default', { text:'Cargando…' });
+
+  const ro = 'ResizeObserver' in window ? new ResizeObserver(() => { chart.resize(); applyResponsive(); }) : null;
+  if (ro) ro.observe(document.getElementById('chart'));
+  window.addEventListener('resize', () => { chart.resize(); applyResponsive(); }, { passive:true });
+
+  try{
+    const rows = await fetchRows();
+    chart.hideLoading();
+    if (!rows.length) { showErr("No se recibieron registros para el filtro solicitado."); return; }
+
+    // Mapear por año y detectar rango dinámico
+    rows.forEach(r => { byYear[String(r.anio)] = { val: r.val }; });
+    const minYear = Math.min(...rows.map(r => r.anio));
+    const maxYear = Math.max(...rows.map(r => r.anio));
+    const YEARS = yearsRange(minYear, maxYear); // eje X dinámico y continuo
+
+    // Serie con null para años sin dato (si hubiese huecos)
+    const serieData = YEARS.map(y => (byYear[y] ? byYear[y].val : null));
+
+    // Ajuste de Y con padding
+    const vals = serieData.filter(v => v!=null && isFinite(v));
+    let yMin=null,yMax=null;
+    if (vals.length){
+      const minVal = Math.min(...vals);
+      const maxVal = Math.max(...vals);
+      const pad = Math.max((maxVal - minVal) * 0.08, Math.max(1, Math.round(maxVal*0.01)));
+      yMin = Math.max(0, Math.floor(minVal - pad));
+      yMax = Math.ceil(maxVal + pad);
+    }
+
+    chart.setOption({
+      xAxis: { data: YEARS },
+      yAxis: { min: yMin, max: yMax },
+      series: [ { data: serieData } ]
+    });
+
+    chart.off('finished');
+    chart.on('finished', applyResponsive);
+    applyResponsive();
+
+  }catch(e){
+    chart.hideLoading();
+    console.error(e);
+    showErr("Error: " + (e && e.message ? e.message : e));
+  }
+})();
+</script>
+</body>
+</html>
