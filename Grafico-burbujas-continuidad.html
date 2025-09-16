@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Continuidad (h) vs Acceso a agua (%) — tamaño: Población (miles)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
+    #chart{height:100vh;width:100vw}
+  </style>
+</head>
+<body>
+<div id="chart"></div>
+
+<script>
+const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/Mapa_coropletico_2/FeatureServer";
+const YEAR_START = 2011;
+const YEAR_END   = 2024;
+
+/* ===== Layer IDs ===== */
+const ID_CONTINUIDAD = 10; // X: continuidad en horas
+const ID_ACCESO_PCT  = 6;  // Y: % acceso a agua
+const ID_ENAPRES     = 5;  // tamaño: población (miles)
+const ID_EJEC_PCT    = 9;  // color: % ejecución (tb_ejecucion_porcentaje_1)
+
+/* ===== Regiones con código (01–25) ===== */
+const REGIONS = [
+  { code:'01', norm:'amazonas',  display:'Amazonas',  macro:'NORTE' },
+  { code:'02', norm:'ancash',    display:'Áncash',    macro:'CENTRO' },
+  { code:'03', norm:'apurimac',  display:'Apurímac',  macro:'SUR' },
+  { code:'04', norm:'arequipa',  display:'Arequipa',  macro:'SUR' },
+  { code:'05', norm:'ayacucho',  display:'Ayacucho',  macro:'SUR' },
+  { code:'06', norm:'cajamarca', display:'Cajamarca', macro:'NORTE' },
+  {
+    code:'07', norm:'callao', display:'Callao', macro:'LIMA Y CALLAO',
+    syns:[
+      'callao','provincia constitucional del callao','provincia_constitucional_del_callao',
+      '07: provincia constitucional del callao','07 provincia constitucional del callao',
+      '07_provincia_constitucional_del_callao','07: PROVINCIA CONSTITUCIONAL DEL CALLAO',
+      'provincia_constitucional_del_ca'
+    ]
+  },
+  { code:'08', norm:'cusco',     display:'Cusco',     macro:'SUR' },
+  { code:'09', norm:'huancavelica', display:'Huancavelica', macro:'SUR' },
+  { code:'10', norm:'huanuco',   display:'Huánuco',   macro:'CENTRO' },
+  { code:'11', norm:'ica',       display:'Ica',       macro:'SUR' },
+  { code:'12', norm:'junin',     display:'Junín',     macro:'CENTRO' },
+  { code:'13', norm:'la_libertad', display:'La Libertad', macro:'NORTE' },
+  { code:'14', norm:'lambayeque', display:'Lambayeque', macro:'NORTE' },
+  { code:'15', norm:'lima',      display:'Lima',      macro:'LIMA Y CALLAO', syns:['lima_metropolitana'] },
+  { code:'16', norm:'loreto',    display:'Loreto',    macro:'NORTE' },
+  { code:'17', norm:'madre_de_dios', display:'Madre de Dios', macro:'SUR', syns:['madre_de','madre'] },
+  { code:'18', norm:'moquegua',  display:'Moquegua',  macro:'SUR' },
+  { code:'19', norm:'pasco',     display:'Pasco',     macro:'CENTRO' },
+  { code:'20', norm:'piura',     display:'Piura',     macro:'NORTE' },
+  { code:'21', norm:'puno',      display:'Puno',      macro:'SUR' },
+  { code:'22', norm:'san_martin', display:'San Martín', macro:'NORTE', syns:['sanmartin','san_martin'] },
+  { code:'23', norm:'tacna',     display:'Tacna',     macro:'SUR' },
+  { code:'24', norm:'tumbes',    display:'Tumbes',    macro:'NORTE' },
+  { code:'25', norm:'ucayali',   display:'Ucayali',   macro:'NORTE' }
+];
+
+const chart = echarts.init(document.getElementById('chart'));
+
+/* ================== Utilidades ================== */
+function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+function normalizeKey(s){
+  return String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9:]+/g,'_')
+    .replace(/^_+|_+$/g,'');
+}
+function stripPrefixNum(nk){ return nk.replace(/^\d+\s*[:_]?_*/,''); }
+const STOP = new Set(['de','del','la','el','los','las','provincia','constitucional','institucional','metropolitana']);
+function tokens(s){ return stripPrefixNum(normalizeKey(s)).split('_').filter(t=>t && !STOP.has(t)); }
+
+// Parser numérico (acepta "0,172", "0.172", "78%", etc.)
+function parseNum(v){
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (v == null) return NaN;
+  let s = String(v).trim();
+  if (!s) return NaN;
+  s = s.replace(/\s/g,'').replace(/%/g,'');
+  const hasComma = s.includes(','), hasDot = s.includes('.');
+  if (hasComma && !hasDot) s = s.replace(/,/g,'.'); else if (hasComma && hasDot) s = s.replace(/,/g,'');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// Año: acepta "2.018" -> 2018
+function parseYear(v){
+  const digits = String(v||'').match(/\d/g);
+  if (!digits) return NaN;
+  const n = Number(digits.join(''));
+  if (Number.isFinite(n) && n >= 1900 && n <= 2100) return n;
+  const n2 = parseNum(v);
+  return (n2>=1900 && n2<=2100) ? n2 : NaN;
+}
+
+// Índice por claves normalizadas y sin prefijo
+function buildRowIndex(row){
+  const map = {};
+  for(const k of Object.keys(row||{})){
+    const nk  = normalizeKey(k);
+    const nk2 = stripPrefixNum(nk);
+    if(!(nk  in map)) map[nk]  = k;
+    if(!(nk2 in map)) map[nk2] = k;
+  }
+  return map;
+}
+
+/* === Pickers de valor === */
+// 1) Por código NN: (encabezados tipo "07: ...")
+function getValueByDeptCode(rowIndex, row, code2){
+  for (const nk of Object.keys(rowIndex)){
+    const m = nk.match(/^(\d{2,3})\s*[:_]/); // sobre claves normalizadas
+    if (m && m[1].padStart(2,'0') === String(code2).padStart(2,'0')) {
+      const real = rowIndex[nk];
+      const v = parseNum(row[real]);
+      if (Number.isFinite(v)) return v;
+    }
+  }
+  return NaN;
+}
+// 2) Por sinónimos/tokens (fallback)
+function getValueBySynonyms(rowIndex, row, region){
+  const candSet = new Set([region.norm, ...(region.syns||[])]);
+  for (const c of candSet){
+    const nk  = normalizeKey(c), nk2 = stripPrefixNum(nk);
+    const real = rowIndex[nk] ?? rowIndex[nk2];
+    if (real != null && row[real] != null){
+      const v = parseNum(row[real]);
+      if (Number.isFinite(v)) return v;
+    }
+  }
+  // tokens
+  const rtoks = tokens(region.norm);
+  let bestKey=null, bestScore=-1;
+  for (const nk of Object.keys(rowIndex)){
+    const tks = tokens(nk);
+    let score = 0;
+    for (const t of rtoks) if (tks.includes(t)) score++;
+    if (nk.includes(normalizeKey(region.norm))) score += 0.5;
+    if (score > bestScore){ bestScore = score; bestKey = nk; }
+  }
+  if (bestKey){
+    const v = parseNum(row[rowIndex[bestKey]]);
+    if (Number.isFinite(v)) return v;
+  }
+  return NaN;
+}
+// 3) Wrapper
+function getRegionValue(rowIndex, row, region){
+  const byCode = getValueByDeptCode(rowIndex, row, region.code);
+  if (Number.isFinite(byCode)) return byCode;
+  return getValueBySynonyms(rowIndex, row, region);
+}
+
+/* Detecta la clave de año en los atributos */
+function detectYearKeyFromAttrs(attrs){
+  const keys = Object.keys(attrs||{});
+  const preferred = ['año','anio','ano','a_o','a_os','year','periodo'];
+  for(const k of keys){
+    const nk = normalizeKey(k), nk2 = stripPrefixNum(nk);
+    if (preferred.includes(k) || preferred.includes(nk) || preferred.includes(nk2) || nk.startsWith('anio') || nk.startsWith('ano')) return k;
+  }
+  for(const k of keys){
+    const yr = parseYear(attrs[k]);
+    if(Number.isFinite(yr)) return k;
+  }
+  return null;
+}
+
+/* Descarga tabla -> Map(year => attributes) */
+async function fetchTableFlexible(layerId){
+  const url = qs(`${SERVICE_BASE}/${layerId}/query`, {
+    where:"1=1", outFields:"*", returnGeometry:"false", f:"json"
+  });
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error(`HTTP ${res.status} al consultar layer ${layerId}`);
+  const json = await res.json();
+  if(json.error) throw new Error(json.error.message || `Error del servicio en layer ${layerId}`);
+  const byYear = new Map();
+  for(const f of (json.features||[])){
+    const a = f.attributes || {};
+    const yearKey = detectYearKeyFromAttrs(a);
+    if(!yearKey) continue;
+    const yr = parseYear(a[yearKey]);
+    if(Number.isFinite(yr) && yr >= YEAR_START && yr <= YEAR_END) byYear.set(yr, a);
+  }
+  return byYear;
+}
+
+function extent(arr){let m=+Infinity,M=-Infinity;for(const v of arr)if(Number.isFinite(v)){if(v<m)m=v;if(v>M)M=v}if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];if(m===M)return[0,M||1];return[m,M]}
+function quantile(a,q){const s=a.slice().sort((x,y)=>x-y);if(!s.length)return NaN;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo)}
+function makeSizeFn(values){const[,mx]=extent(values);return x=>{const v=Math.max(0,Number(x)||0);const t=mx>0?(v/mx):0;return (Math.sqrt(t)+0.10)*60}}
+function colorForEjec(p){const v=Number(p);if(!Number.isFinite(v))return '#9e9e9e';if(v>90)return'#2ca02c';if(v>=70)return'#f1c40f';if(v>=50)return'#fb8c00';return'#d62728'}
+
+/* ================== Render ================== */
+(async function run(){
+  try{
+    chart.showLoading({ text: 'Cargando datos…' });
+
+    const [contByYear, accesoPctByYear, enapresByYear, ejecByYear] = await Promise.all([
+      fetchTableFlexible(ID_CONTINUIDAD), // X (horas)
+      fetchTableFlexible(ID_ACCESO_PCT),  // Y (%)
+      fetchTableFlexible(ID_ENAPRES),     // tamaño (miles)
+      fetchTableFlexible(ID_EJEC_PCT)     // color: % ejecución (0–1 en tu tabla)
+    ]);
+
+    // Construimos años y rangos
+    const years=[]; const allX=[], allY=[], allSize=[];
+    for(let y=YEAR_START;y<=YEAR_END;y++){
+      const rowX=contByYear.get(y), rowY=accesoPctByYear.get(y), rowS=enapresByYear.get(y);
+      if(!rowX || !rowY || !rowS) continue;
+      const idxX=buildRowIndex(rowX), idxY=buildRowIndex(rowY), idxS=buildRowIndex(rowS);
+      let any=false;
+      for(const r of REGIONS){
+        const xv=getRegionValue(idxX,rowX,r);    // horas
+        const yv=getRegionValue(idxY,rowY,r);    // %
+        const sv=getRegionValue(idxS,rowS,r);    // miles
+        if(Number.isFinite(xv)) allX.push(xv);
+        if(Number.isFinite(yv)) allY.push(yv);
+        if(Number.isFinite(sv)) allSize.push(sv);
+        if(Number.isFinite(xv) && Number.isFinite(yv)) any=true;
+      }
+      if(any) years.push(y);
+    }
+    if(!years.length) throw new Error('No hay años con datos válidos para X e Y.');
+
+    // Rangos con padding
+    const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
+    const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
+    const xPad=(xQ95-xQ05)*0.05, yPad=(yQ95-yQ05)*0.05;
+    const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
+    const xInitMin = Math.min(xQ05 - xPad, xMinAll);
+    const xInitMax = Math.max(xQ95 + xPad, xMaxAll);
+    const clamp01 = v => Math.max(0, Math.min(100, v));
+    const yInitMin = clamp01(Math.min(yQ05 - yPad, yMinAll));
+    const yInitMax = clamp01(Math.max(yQ95 + yPad, yMaxAll));
+
+    const sizeFn = makeSizeFn(allSize);
+
+    // Opciones por año
+    const options=[];
+    for(const y of years){
+      const rowX=contByYear.get(y), rowY=accesoPctByYear.get(y), rowS=enapresByYear.get(y), rowC=ejecByYear.get(y)||{};
+      const idxX=buildRowIndex(rowX), idxY=buildRowIndex(rowY), idxS=buildRowIndex(rowS), idxC=buildRowIndex(rowC);
+
+      const points = REGIONS.map(r=>{
+        const X = getRegionValue(idxX,rowX,r);      // horas
+        const Y = getRegionValue(idxY,rowY,r);      // %
+        const S = getRegionValue(idxS,rowS,r);      // miles
+
+        // % Ejecución: viene 0–1 → forzamos ×100
+        const rawC = getRegionValue(idxC,rowC,r);
+        const C = Number.isFinite(rawC) ? rawC * 100 : NaN;
+
+        return { value:[X,Y,S,r.display,r.macro,C], itemStyle:{ color: colorForEjec(C), opacity:0.85 } };
+      }).filter(d => Number.isFinite(d.value[0]) && Number.isFinite(d.value[1]));
+
+      options.push({
+        title:{ show:true, text:String(y) },
+        series:[{
+          name:String(y),
+          type:'scatter',
+          data:points,
+          symbolSize:(val)=>sizeFn(val[2]),
+          emphasis:{ scale:1.08, focus:'self' },
+          label:{ show:true, formatter:(p)=>p.value[3], position:'right', fontSize:10, color:'#333' }
+        }]
+      });
+    }
+
+    const nf  = new Intl.NumberFormat('es-PE');
+    const pf0 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:0 });
+    const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
+    const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
+
+    const option={
+      baseOption:{
+        timeline:{
+          axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
+          playInterval:1200, right:0, top:20, bottom:20, width:55, symbol:'none',
+          checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
+          data: years
+        },
+        title:[
+          { text: years[0], right: 155, bottom: 52, textAlign: 'right',
+            textStyle: { fontSize: 32, fontWeight: 700, color: '#e5e7eb' } },
+          { text: 'Continuidad (h) vs Acceso a agua (%) — tamaño: Población (miles)',
+            left: 'center', top: 8, textStyle: { fontWeight: '600', fontSize: 16 } }
+        ],
+        tooltip:{
+          padding:6, borderWidth:1,
+          formatter:(obj)=>{
+            const [cont, acceso, pob, region, macro, ejec] = obj.value;
+            const ejecTxt = Number.isFinite(ejec) ? pf2.format(ejec) + '%' : '—';
+            return `
+              <b>${region}</b> (${macro})<br>
+              Continuidad: <b>${pf1.format(cont)} h</b><br>
+              Acceso a agua: <b>${pf2.format(acceso)}%</b><br>
+              % Ejecución: <b>${ejecTxt}</b><br>
+              Población (miles): <b>${nf.format(pob)}</b>
+            `;
+          }
+        },
+        grid:{ top:80, left:40, right:140, bottom:90, containLabel:true },
+        xAxis:{ type:'value', name:'Continuidad del servicio (horas)',
+          min:xInitMin, max:xInitMax, nameGap:25, nameLocation:'middle',
+          nameTextStyle:{ fontSize:14 }, splitLine:{ show:true },
+          axisLabel:{ formatter:(v)=>`${pf1.format(v)}` } },
+        yAxis:{ type:'value', name:'Acceso a agua (%)',
+          min:yInitMin, max:yInitMax, nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
+          axisLabel:{ formatter:(v)=>`${pf0.format(v)}%` } },
+        dataZoom:[
+          { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
+          { type:'inside', xAxisIndex:0, filterMode:'none' },
+          { type:'slider', yAxisIndex:0, filterMode:'none', right:6, width:12 },
+          { type:'inside', yAxisIndex:0, filterMode:'none' }
+        ],
+        series:[{ type:'scatter', data:[] }],
+        animationDurationUpdate:1000,
+        animationEasingUpdate:'quinticInOut'
+      },
+      options
+    };
+
+    chart.hideLoading();
+    chart.setOption(option);
+    window.addEventListener('resize', ()=>chart.resize());
+  }catch(err){
+    console.error(err);
+    chart.hideLoading();
+    chart.setOption({
+      title:{ text:'Error al cargar datos', left:'center' },
+      graphic:{ type:'text', left:'center', top:'middle',
+        style:{ text: (err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
+    });
+  }
+})();
+</script>
+</body>
+</html>
