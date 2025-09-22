@@ -58,13 +58,12 @@
   <!-- Texto que muestra la leyenda como tooltip al pasar el mouse -->
   <div class="legend-bar" aria-hidden="true">
     <div class="legend-trigger">Leyenda burbuja</div>
-    <div class="legend-tip" role="tooltip" aria-label="Leyenda de colores para porcentaje de población con cloro residual aceptable">
-      <h4>Color por % Cl aceptable</h4>
-      <div class="lg-row"><span class="lg-chip" style="background:#2ecc71"></span><span>≥ 75%</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#f1c40f"></span><span>60% – 74%</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>40% – 59%</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#e57373"></span><span>15% – 39%</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>0% – 14%</span></div>
+    <div class="legend-tip" role="tooltip" aria-label="Leyenda de colores según continuidad (horas)">
+      <h4>Color por Continuidad (h)</h4>
+      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>0 – &lt; 6 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>6 – &lt; 12 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#f1c40f"></span><span>12 – &lt; 18 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#2563eb"></span><span>≥ 18 h</span></div>
       <div class="lg-row"><span class="lg-chip" style="background:#9e9e9e"></span><span class="muted">Sin dato</span></div>
     </div>
   </div>
@@ -76,10 +75,10 @@ const YEAR_START = 2017;
 const YEAR_END   = 2024;
 
 /* ===== Layer IDs ===== */
-const ID_CONTINUIDAD = 10; // X: continuidad en horas
+const ID_CONTINUIDAD = 10; // color: continuidad en horas (0–24+)
 const ID_ACCESO_PCT  = 6;  // Y: % acceso a agua
-const ID_PCT_ALCDSE  = 16; // tamaño: % Pob. con Alc/DSE  (tb_porcent_pob_c_alcdse)
-const ID_CLORO_OK    = 12; // color: % Pob. con Cl aceptable (tb_pob_cloro_residual_acept)
+const ID_PCT_ALCDSE  = 16; // X: % Pob. con Alc/DSE  (tb_porcent_pob_c_alcdse)
+const ID_CLORO_OK    = 12; // tamaño: % Pob. con Cl aceptable (tb_pob_cloro_residual_acept)
 
 /* ===== Regiones con código (01–25) ===== */
 const REGIONS = [
@@ -247,15 +246,14 @@ function makeSizeFn(values, minPx=12, maxPx=52){
   }
 }
 
-/* Colores: % Pob. con Cl aceptable */
-function colorForCloro(p){
-  const v = Number(p);
-  if(!Number.isFinite(v)) return '#9e9e9e';     // gris si no hay dato
-  if(v >= 75) return '#2ecc71';                // verde
-  if(v >= 60) return '#f1c40f';                // amarillo
-  if(v >= 40) return '#fb8c00';                // naranja
-  if(v >= 15) return '#e57373';                // rojo tenue
-  return '#c62828';                             // rojo intenso
+/* Colores por continuidad (horas) */
+function colorForContinuidad(h){
+  const v = Number(h);
+  if(!Number.isFinite(v)) return '#9e9e9e'; // gris si no hay dato
+  if(v < 6)  return '#c62828';              // rojo intenso
+  if(v < 12) return '#fb8c00';              // naranja
+  if(v < 18) return '#f1c40f';              // amarillo
+  return '#2563eb';                         // azul (≥18)
 }
 
 /* ================== Render ================== */
@@ -263,23 +261,24 @@ function colorForCloro(p){
   try{
     chart.showLoading({ text: 'Cargando datos…' });
 
+    // X = % Alc/DSE (ID_PCT_ALCDSE), Tamaño = % Cl aceptable (ID_CLORO_OK), Color = Continuidad (ID_CONTINUIDAD)
     const [contByYear, accesoPctByYear, pctAlcDseByYear, cloroOkByYear] = await Promise.all([
-      fetchTableFlexible(ID_CONTINUIDAD), // X (horas)
+      fetchTableFlexible(ID_CONTINUIDAD), // color
       fetchTableFlexible(ID_ACCESO_PCT),  // Y (% acceso)
-      fetchTableFlexible(ID_PCT_ALCDSE),  // tamaño: % Pob. con Alc/DSE
-      fetchTableFlexible(ID_CLORO_OK)     // color: % Pob. con Cl aceptable
+      fetchTableFlexible(ID_PCT_ALCDSE),  // X (% Alc/DSE)
+      fetchTableFlexible(ID_CLORO_OK)     // tamaño (% Cl aceptable)
     ]);
 
     const years=[]; const allX=[], allY=[], allSize=[];
     for(let y=YEAR_START;y<=YEAR_END;y++){
-      const rowX=contByYear.get(y), rowY=accesoPctByYear.get(y), rowS=pctAlcDseByYear.get(y);
+      const rowX=pctAlcDseByYear.get(y), rowY=accesoPctByYear.get(y), rowS=cloroOkByYear.get(y);
       if(!rowX || !rowY || !rowS) continue;
       const idxX=buildRowIndex(rowX), idxY=buildRowIndex(rowY), idxS=buildRowIndex(rowS);
       let any=false;
       for(const r of REGIONS){
-        const xv=getRegionValue(idxX,rowX,r);
-        const yv=getRegionValue(idxY,rowY,r);
-        const sv=getRegionValue(idxS,rowS,r);   // % Alc/DSE (0–100)
+        const xv=getRegionValue(idxX,rowX,r); // % Alc/DSE
+        const yv=getRegionValue(idxY,rowY,r); // % Acceso agua
+        const sv=getRegionValue(idxS,rowS,r); // % Cl aceptable (tamaño)
         if(Number.isFinite(xv)) allX.push(xv);
         if(Number.isFinite(yv)) allY.push(yv);
         if(Number.isFinite(sv)) allSize.push(sv);
@@ -289,29 +288,31 @@ function colorForCloro(p){
     }
     if(!years.length) throw new Error('No hay años con datos válidos para X e Y.');
 
+    // Rango inicial (clamp 0–100 para porcentajes)
     const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
     const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
     const xPad=(xQ95-xQ05)*0.05, yPad=(yQ95-yQ05)*0.05;
     const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
-    const xInitMin = Math.min(xQ05 - xPad, xMinAll);
-    const xInitMax = Math.max(xQ95 + xPad, xMaxAll);
     const clamp01 = v => Math.max(0, Math.min(100, v));
+    const xInitMin = clamp01(Math.min(xQ05 - xPad, xMinAll));
+    const xInitMax = clamp01(Math.max(xQ95 + xPad, xMaxAll));
     const yInitMin = clamp01(Math.min(yQ05 - yPad, yMinAll));
     const yInitMax = clamp01(Math.max(yQ95 + yPad, yMaxAll));
 
-    const sizeFn = makeSizeFn(allSize, 12, 52); // ← límites del tamaño
+    const sizeFn = makeSizeFn(allSize, 12, 52); // tamaño = % Cl aceptable
 
     const options=[];
     for(const y of years){
-      const rowX=contByYear.get(y), rowY=accesoPctByYear.get(y), rowS=pctAlcDseByYear.get(y), rowC=cloroOkByYear.get(y)||{};
+      const rowX=pctAlcDseByYear.get(y), rowY=accesoPctByYear.get(y), rowS=cloroOkByYear.get(y), rowC=contByYear.get(y)||{};
       const idxX=buildRowIndex(rowX), idxY=buildRowIndex(rowY), idxS=buildRowIndex(rowS), idxC=buildRowIndex(rowC);
 
       const points = REGIONS.map(r=>{
-        const X = getRegionValue(idxX,rowX,r);      // horas
-        const Y = getRegionValue(idxY,rowY,r);      // % acceso
-        const S = getRegionValue(idxS,rowS,r);      // % Alc/DSE (0–100) — tamaño
-        const PCL = getRegionValue(idxC,rowC,r);    // % cloro aceptable (0–100) — color
-        return { value:[X,Y,S,r.display,r.macro,PCL], itemStyle:{ color: colorForCloro(PCL), opacity:0.85 } };
+        const X = getRegionValue(idxX,rowX,r);   // % Alc/DSE → eje X
+        const Y = getRegionValue(idxY,rowY,r);   // % Acceso agua → eje Y
+        const S = getRegionValue(idxS,rowS,r);   // % Cl aceptable → tamaño
+        const CONT = getRegionValue(idxC,rowC,r);// horas continuidad → color
+        return { value:[X,Y,S,r.display,r.macro,CONT],
+                 itemStyle:{ color: colorForContinuidad(CONT), opacity:0.85 } };
       }).filter(d => Number.isFinite(d.value[0]) && Number.isFinite(d.value[1]));
 
       options.push({
@@ -320,7 +321,7 @@ function colorForCloro(p){
           name:String(y),
           type:'scatter',
           data:points,
-          symbolSize:(val)=>sizeFn(val[2]),  // tamaño controlado
+          symbolSize:(val)=>sizeFn(val[2]),
           emphasis:{ scale:1.08, focus:'self' },
           label:{ show:true, formatter:(p)=>p.value[3], position:'right', fontSize:10, color:'#333' }
         }]
@@ -348,23 +349,25 @@ function colorForCloro(p){
         tooltip:{
           padding:6, borderWidth:1,
           formatter:(obj)=>{
-            const [cont, acceso, pctAlcDse, region, macro, pcl] = obj.value;
-            const pclTxt    = Number.isFinite(pcl) ? pf2.format(pcl) + '%' : '—';
-            const alcDseTxt = Number.isFinite(pctAlcDse) ? pf2.format(pctAlcDse) + '%' : '—';
+            const [xAlcDse, yAcceso, pctCl, region, macro, contH] = obj.value;
+            const xTxt   = Number.isFinite(xAlcDse) ? pf2.format(xAlcDse) + '%' : '—';
+            const yTxt   = Number.isFinite(yAcceso) ? pf2.format(yAcceso) + '%' : '—';
+            const sizeTxt= Number.isFinite(pctCl)   ? pf2.format(pctCl)   + '%' : '—';
+            const contTxt= Number.isFinite(contH)   ? pf1.format(contH)   + ' h' : '—';
             return `
               <b>${region}</b> (${macro})<br>
-              Continuidad: <b>${pf1.format(cont)} h</b><br>
-              Acceso a agua: <b>${pf2.format(acceso)}%</b><br>
-              % Acceso a Alc/DSE (tamaño): <b>${alcDseTxt}</b><br>
-              % Pob. con Cl aceptable (color): <b>${pclTxt}</b>
+              % Pob. con Alc/DSE (X): <b>${xTxt}</b><br>
+              Acceso a agua (Y): <b>${yTxt}</b><br>
+              % Pob. con Cl aceptable (tamaño): <b>${sizeTxt}</b><br>
+              Continuidad (color): <b>${contTxt}</b>
             `;
           }
         },
         grid:{ top:86, left:40, right:140, bottom:90, containLabel:true },
-        xAxis:{ type:'value', name:'Continuidad del servicio (horas)',
+        xAxis:{ type:'value', name:'% Pob. con Alc/DSE',
           min:xInitMin, max:xInitMax, nameGap:25, nameLocation:'middle',
-          nameTextStyle:{ fontSize:14 }, splitLine:{ show:true },
-          axisLabel:{ formatter:(v)=>`${pf1.format(v)}` } },
+          nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
+          axisLabel:{ formatter:(v)=>`${pf0.format(v)}%` } },
         yAxis:{ type:'value', name:'Acceso a agua (%)',
           min:yInitMin, max:yInitMax, nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
           axisLabel:{ formatter:(v)=>`${pf0.format(v)}%` } },
