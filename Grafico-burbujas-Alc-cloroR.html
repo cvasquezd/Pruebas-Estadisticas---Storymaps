@@ -30,7 +30,7 @@
     }
     .legend-tip{
       position:absolute;left:50%;transform:translateX(-50%);
-      top:28px;                 /* aparece debajo del trigger */
+      top:28px;
       background:rgba(255,255,255,.96);
       backdrop-filter:saturate(130%) blur(2px);
       border:1px solid #e5e7eb;border-radius:12px;
@@ -55,15 +55,15 @@
 <div id="wrap">
   <div id="chart"></div>
 
-  <!-- Texto que muestra la leyenda como tooltip al pasar el mouse -->
+  <!-- Leyenda SOLO escala de color por continuidad -->
   <div class="legend-bar" aria-hidden="true">
     <div class="legend-trigger">Leyenda burbuja</div>
     <div class="legend-tip" role="tooltip" aria-label="Leyenda de colores según continuidad (horas)">
       <h4>Color por Continuidad (h)</h4>
-      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>0 – &lt; 6 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>6 – &lt; 12 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#f1c40f"></span><span>12 – &lt; 18 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#2563eb"></span><span>≥ 18 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>&lt; 6 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#ef5350"></span><span>6 – &lt; 12 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>12 – &lt; 18 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#2ecc71"></span><span>18 – 24 h</span></div>
       <div class="lg-row"><span class="lg-chip" style="background:#9e9e9e"></span><span class="muted">Sin dato</span></div>
     </div>
   </div>
@@ -246,14 +246,18 @@ function makeSizeFn(values, minPx=12, maxPx=52){
   }
 }
 
-/* Colores por continuidad (horas) */
+/* ===== Colores por continuidad (horas) — NUEVOS RANGOS =====
+   < 6  -> rojo intenso
+   6-12 -> rojo claro
+   12-18-> naranja
+   18-24-> verde (y ≥24 también verde) */
 function colorForContinuidad(h){
   const v = Number(h);
-  if(!Number.isFinite(v)) return '#9e9e9e'; // gris si no hay dato
-  if(v < 6)  return '#c62828';              // rojo intenso
-  if(v < 12) return '#fb8c00';              // naranja
-  if(v < 18) return '#f1c40f';              // amarillo
-  return '#2563eb';                         // azul (≥18)
+  if(!Number.isFinite(v)) return '#9e9e9e'; // sin dato
+  if(v < 6)  return '#c62828'; // rojo intenso
+  if(v < 12) return '#ef5350'; // rojo claro
+  if(v < 18) return '#fb8c00'; // naranja
+  return '#2ecc71';            // verde (≥18)
 }
 
 /* ================== Render ================== */
@@ -261,7 +265,7 @@ function colorForContinuidad(h){
   try{
     chart.showLoading({ text: 'Cargando datos…' });
 
-    // X = % Alc/DSE (ID_PCT_ALCDSE), Tamaño = % Cl aceptable (ID_CLORO_OK), Color = Continuidad (ID_CONTINUIDAD)
+    // X = % Alc/DSE, Tamaño = % Cl aceptable, Color = Continuidad
     const [contByYear, accesoPctByYear, pctAlcDseByYear, cloroOkByYear] = await Promise.all([
       fetchTableFlexible(ID_CONTINUIDAD), // color
       fetchTableFlexible(ID_ACCESO_PCT),  // Y (% acceso)
@@ -276,8 +280,8 @@ function colorForContinuidad(h){
       const idxX=buildRowIndex(rowX), idxY=buildRowIndex(rowY), idxS=buildRowIndex(rowS);
       let any=false;
       for(const r of REGIONS){
-        const xv=getRegionValue(idxX,rowX,r); // % Alc/DSE
-        const yv=getRegionValue(idxY,rowY,r); // % Acceso agua
+        const xv=getRegionValue(idxX,rowX,r); // % Alc/DSE (X)
+        const yv=getRegionValue(idxY,rowY,r); // % Acceso agua (Y)
         const sv=getRegionValue(idxS,rowS,r); // % Cl aceptable (tamaño)
         if(Number.isFinite(xv)) allX.push(xv);
         if(Number.isFinite(yv)) allY.push(yv);
@@ -350,16 +354,16 @@ function colorForContinuidad(h){
           padding:6, borderWidth:1,
           formatter:(obj)=>{
             const [xAlcDse, yAcceso, pctCl, region, macro, contH] = obj.value;
-            const xTxt   = Number.isFinite(xAlcDse) ? pf2.format(xAlcDse) + '%' : '—';
-            const yTxt   = Number.isFinite(yAcceso) ? pf2.format(yAcceso) + '%' : '—';
-            const sizeTxt= Number.isFinite(pctCl)   ? pf2.format(pctCl)   + '%' : '—';
-            const contTxt= Number.isFinite(contH)   ? pf1.format(contH)   + ' h' : '—';
+            const yTxt    = Number.isFinite(yAcceso) ? pf2.format(yAcceso) + '%' : '—';
+            const xTxt    = Number.isFinite(xAlcDse) ? pf2.format(xAlcDse) + '%' : '—';
+            const contTxt = Number.isFinite(contH)   ? pf1.format(contH)   + ' h' : '—';
+            const sizeTxt = Number.isFinite(pctCl)   ? pf2.format(pctCl)   + '%' : '—';
             return `
               <b>${region}</b> (${macro})<br>
-              % Pob. con Alc/DSE (X): <b>${xTxt}</b><br>
               Acceso a agua (Y): <b>${yTxt}</b><br>
-              % Pob. con Cl aceptable (tamaño): <b>${sizeTxt}</b><br>
-              Continuidad (color): <b>${contTxt}</b>
+              % Pob. con Alc/DSE (X): <b>${xTxt}</b><br>
+              Continuidad (color): <b>${contTxt}</b><br>
+              % Pob. con Cl aceptable (tamaño): <b>${sizeTxt}</b>
             `;
           }
         },
