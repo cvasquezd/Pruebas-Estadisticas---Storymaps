@@ -70,6 +70,16 @@
 </div>
 
 <script>
+/* ===================== CONFIGURACIÓN DE BORDE ===================== */
+/* Cambia estos valores a tu gusto */
+const DOT_BORDER = {
+  color: '#0f172a',   // Color del borde (hex, rgb, etc.)
+  width: 0.1,         // Espesor del borde en px (p.ej. 0, 1, 1.5, 2)
+  type: 'solid',      // 'solid' | 'dashed' | 'dotted'
+  opacity: 0.90       // Opacidad del relleno (no del borde)
+};
+/* ================================================================== */
+
 const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/Mapa_coropletico_2/FeatureServer";
 const YEAR_START = 2017;
 const YEAR_END   = 2024;
@@ -77,8 +87,8 @@ const YEAR_END   = 2024;
 /* ===== Layer IDs ===== */
 const ID_CONTINUIDAD = 10; // color: continuidad en horas (0–24+)
 const ID_ACCESO_PCT  = 6;  // Y: % acceso a agua
-const ID_PCT_ALCDSE  = 16; // X: % Pob. con Alc/DSE  (tb_porcent_pob_c_alcdse)
-const ID_CLORO_OK    = 12; // tamaño: % Pob. con Cl aceptable (tb_pob_cloro_residual_acept)
+const ID_PCT_ALCDSE  = 16; // X: % Pob. con Alc/DSE
+const ID_CLORO_OK    = 12; // tamaño: % Pob. con Cl aceptable
 
 /* ===== Regiones con código (01–25) ===== */
 const REGIONS = [
@@ -315,8 +325,25 @@ function colorForContinuidad(h){
         const Y = getRegionValue(idxY,rowY,r);   // % Acceso agua → eje Y
         const S = getRegionValue(idxS,rowS,r);   // % Cl aceptable → tamaño
         const CONT = getRegionValue(idxC,rowC,r);// horas continuidad → color
-        return { value:[X,Y,S,r.display,r.macro,CONT],
-                 itemStyle:{ color: colorForContinuidad(CONT), opacity:0.85 } };
+        return {
+          value:[X,Y,S,r.display,r.macro,CONT],
+          itemStyle:{
+            color: colorForContinuidad(CONT),
+            opacity: DOT_BORDER.opacity,
+            borderColor: DOT_BORDER.color,
+            borderWidth: DOT_BORDER.width,
+            borderType: DOT_BORDER.type
+          },
+          emphasis:{
+            itemStyle:{
+              borderColor: DOT_BORDER.color,
+              borderWidth: Math.max(DOT_BORDER.width + 0.5, DOT_BORDER.width),
+              borderType: DOT_BORDER.type
+            },
+            scale:1.08,
+            focus:'self'
+          }
+        };
       }).filter(d => Number.isFinite(d.value[0]) && Number.isFinite(d.value[1]));
 
       options.push({
@@ -326,7 +353,6 @@ function colorForContinuidad(h){
           type:'scatter',
           data:points,
           symbolSize:(val)=>sizeFn(val[2]),
-          emphasis:{ scale:1.08, focus:'self' },
           label:{ show:true, formatter:(p)=>p.value[3], position:'right', fontSize:10, color:'#333' }
         }]
       });
