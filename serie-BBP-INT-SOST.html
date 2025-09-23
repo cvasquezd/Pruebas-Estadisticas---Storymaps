@@ -109,15 +109,15 @@
       scale: true
     },
     animation: true,
-    animationDuration: 4000,
+    animationDuration: 5000,
     animationEasing: 'linear',
-    animationDurationUpdate: 600,
+    animationDurationUpdate: 200,
     series: CODS.map(c => ({
       name: NAMES[c],
       type: 'line',
       smooth: true,
-      showSymbol: true, symbol: 'diamond', symbolSize: 15,
-      lineStyle: { width: 4, color: COLORS[c] },
+      showSymbol: true, symbol: 'diamond', symbolSize: 12,
+      lineStyle: { width: 3, color: COLORS[c] },
       itemStyle: { color: COLORS[c] },
       label: {
         show: false,
