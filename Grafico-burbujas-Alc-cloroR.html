@@ -303,7 +303,7 @@ function colorForContinuidad(h){
     const yInitMin = clamp01(Math.min(yQ05 - yPad, yMinAll));
     const yInitMax = clamp01(Math.max(yQ95 + yPad, yMaxAll));
 
-    const sizeFn = makeSizeFn(allSize, 12, 52); // tamaño = % Cl aceptable
+    const sizeFn = makeSizeFn(allSize, 5, 75); // tamaño = % Cl aceptable
 
     const options=[];
     for(const y of years){
