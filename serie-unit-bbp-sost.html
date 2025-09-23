@@ -61,7 +61,7 @@
              axisLabel:{fontSize:12,margin:10,formatter:v=>new Intl.NumberFormat('es-PE',{notation:'compact'}).format(v)},
              splitLine:{show:true},scale:true,min:yMin,max:yMax},
       series:[{type:'line',smooth:true,showSymbol:true,symbol:'diamond',symbolSize:12,
-               lineStyle:{width:4,color:COLOR},itemStyle:{color:COLOR},
+               lineStyle:{width:3,color:COLOR},itemStyle:{color:COLOR},
                label:{show:false,position:'top',distance:10,fontSize:11,
                       formatter:(p)=>p.value==null?'':new Intl.NumberFormat('es-PE').format(+p.value)},
                data:YEARS.map(()=>null)}],
