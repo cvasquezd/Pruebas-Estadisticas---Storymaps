@@ -13,10 +13,10 @@
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
     overflow:hidden; /* evita barras en el embed */
   }
+  /* Alto similar al del StoryMap de tu captura */
   #chart{
     width:100%;
-    height:100dvh;  /* navegadores modernos */
-    height:100vh;   /* fallback */
+    height:860px;   /* ajusta si quieres: 700–900px suele ir perfecto */
   }
   #err{
     position:fixed;left:10px;bottom:10px;display:none;background:#fff;border:1px solid #fecaca;color:#b91c1c;
@@ -33,7 +33,6 @@
   const SERVICE   = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer";
   const LYR_LIMIT = 1, TBL_VAL = 6, COD_VAR = 70, YEAR = 2024;
 
-  /* ===== Layout original ===== */
   const COL_LEFT_PCT  = 0.18;
   const COL_RIGHT_PCT = 0.84;
 
@@ -55,7 +54,6 @@
   ]);
   const CAJ_VERTICAL_UP = 120;
 
-  /* ===== Utils ===== */
   const qs=(u,p)=>u+"?"+new URLSearchParams(p).toString();
   const nf=v=>new Intl.NumberFormat('es-PE').format(v||0);
   const N=s=>(s||"").toUpperCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
@@ -81,34 +79,19 @@
     return null;
   }
 
-  // Punto en polígono (ray casting) en coords lon/lat
-  function pointInRing([px,py], ring){
-    let inside=false;
-    for(let i=0,j=ring.length-1;i<ring.length;i++){
-      const xi=ring[i][0], yi=ring[i][1];
-      const xj=ring[j][0], yj=ring[j][1];
-      const intersect = ((yi>py)!=(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi+1e-12)+xi);
-      if(intersect) inside=!inside;
-      j=i;
-    }
-    return inside;
-  }
-
   async function getLimites(){
     const url=qs(`${SERVICE}/${LYR_LIMIT}/query`,{where:"1=1",outFields:"*",returnGeometry:"true",outSR:4326,f:"json"});
     const r=await fetch(url,{cache:"no-store"}); if(!r.ok) throw new Error("HTTP "+r.status);
     const j=await r.json(); const feats=j.features||[]; if(!feats.length) throw new Error("Layer 1 sin features.");
     const nameField=pickNameField(feats[0].attributes||{})||"name";
-    const geoFeats=[]; const bases=new Map(); const pretty=new Map(); const ringsMap=new Map();
+    const geoFeats=[]; const bases=new Map(); const pretty=new Map();
     feats.forEach(f=>{
       const nm=f.attributes?.[nameField]; if(!nm||!f.geometry?.rings) return;
       const poly=ringsToPolygon(f.geometry.rings);
       geoFeats.push({type:"Feature",properties:{name:nm},geometry:poly});
       const c=centroid(poly); if(c){ bases.set(N(nm),c); pretty.set(N(nm),nm); }
-      // guardamos el primer ring exterior para test de inclusión
-      if(f.geometry.rings && f.geometry.rings[0]) ringsMap.set(N(nm), f.geometry.rings[0].map(([x,y])=>[x,y]));
     });
-    return {geojson:{type:"FeatureCollection",features:geoFeats}, bases, pretty, ringsMap};
+    return {geojson:{type:"FeatureCollection",features:geoFeats}, bases, pretty};
   }
 
   async function getValores(){
@@ -130,17 +113,15 @@
 
   const chart=echarts.init(document.getElementById('chart'));
 
-  // Debounce para redimensionamientos en StoryMap
-  let resizeTimer=null;
-  const debounced = (fn,ms=120)=>{ clearTimeout(resizeTimer); resizeTimer=setTimeout(fn,ms); };
-  const ro = new ResizeObserver(()=>{ chart.resize(); debounced(()=>draw()); });
+  // Redibuja cuando cambie el tamaño del contenedor (StoryMap)
+  const ro = new ResizeObserver(()=>{ chart.resize(); draw(); });
   ro.observe(document.getElementById('chart'));
-  window.addEventListener('orientationchange', ()=>debounced(()=>{chart.resize(); draw();}, 150), {passive:true});
+  window.addEventListener('orientationchange', ()=>setTimeout(()=>{chart.resize(); draw();}, 150), {passive:true});
 
   chart.showLoading('default',{text:'Cargando…'});
 
   try{
-    const [{geojson,bases,pretty,ringsMap},{vals,prettyTab}] = await Promise.all([getLimites(), getValores()]);
+    const [{geojson,bases,pretty},{vals,prettyTab}] = await Promise.all([getLimites(), getValores()]);
     echarts.registerMap('peru', geojson, {});
     chart.setOption({
       backgroundColor:'#fff',
@@ -153,60 +134,15 @@
     });
     chart.hideLoading();
 
-    /* ==== Anti-colisión con líneas rectas + puntos dentro del polígono ==== */
-    function spread(items, yMin, yMax, minGap){
-      items.sort((a,b)=>a.pA[1]-b.pA[1]);
-      let yPrev = yMin - minGap;
-      for(const it of items){
-        const yTarget = Math.max(it.pA[1], yPrev + minGap);
-        it.pA[1] = Math.min(yTarget, yMax);
-        yPrev = it.pA[1];
-      }
-      // Ajuste hacia arriba si chocó con yMax
-      for(let i=items.length-2;i>=0;i--){
-        if(items[i].pA[1] + minGap > items[i+1].pA[1]){
-          items[i].pA[1] = Math.max(yMin, items[i+1].pA[1] - minGap);
-        }
-      }
-    }
-
-    // Empuja un punto en pixeles hacia su centroide hasta entrar al ring
-    function nudgeInside(item){
-      const ring = ringsMap.get(item.key) || ringsMap.get(N("SAN MARTÍN")) || null;
-      if(!ring) return;
-      let ll = chart.convertFromPixel({geoIndex:0}, item.pA); // lon/lat del punto
-      if(pointInRing(ll, ring)) return; // ya está adentro
-      const stepMax = 40; // iteraciones máx
-      const stepPx  = 2;  // tamaño de paso en pixeles
-      for(let i=0;i<stepMax;i++){
-        const dx = item.pC[0]-item.pA[0], dy = item.pC[1]-item.pA[1];
-        const d = Math.hypot(dx,dy)||1;
-        item.pA[0] += (dx/d)*stepPx;
-        item.pA[1] += (dy/d)*stepPx;
-        ll = chart.convertFromPixel({geoIndex:0}, item.pA);
-        if(pointInRing(ll, ring)) break;
-      }
-    }
-
     function draw(){
-      const W=chart.getWidth(), H=chart.getHeight();
+      const W=chart.getWidth();
       const colL = Math.round(W * COL_LEFT_PCT);
       const colR = Math.round(W * COL_RIGHT_PCT);
 
-      // márgenes para no cortar con barras/iframe
-      const topPad = Math.max(18, H*0.05);
-      const botPad = Math.max(22, H*0.06);
-      const yMin = topPad, yMax = H - botPad;
-
-      // separación mínima entre líneas (horizontal)
-      const minGap = Math.max(16, Math.min(28, Math.round(H/26)));
-      const fs = Math.max(11, Math.min(13, Math.round(W/90)));
-
+      const elements=[];
       const norm=s=>N(s);
-      const left=[], right=[];
-      let caj=null;
 
-      function collect(label){
+      function addDept(label){
         const key = norm(label);
         const baseKey = (key===norm("SAN MARTIN")) ? (bases.has(norm("SAN MARTÍN"))?norm("SAN MARTÍN"):key) : key;
         const lonlat = bases.get(baseKey); if(!lonlat) return;
@@ -214,22 +150,26 @@
         const p0 = chart.convertToPixel({geoIndex:0}, lonlat);
         const s  = POINT_SHIFT[key] || [0,0];
         const pA = [p0[0]+s[0], p0[1]+s[1]];
-        const pC = chart.convertToPixel({geoIndex:0}, lonlat);
 
         let name = prettyTab.get(key) || (key===norm("SAN MARTIN") ? (prettyTab.get(norm("SAN MARTÍN"))||"San Martín") : (pretty.get(key)||""));
         let v    = (key===norm("SAN MARTIN")) ? (vals.get(norm("SAN MARTÍN")) ?? vals.get(key)) : vals.get(key);
         v = v==null ? 0 : v;
 
-        const itm = {key,name,v,pA,pC,side:(RIGHT_COL.has(key)?'right':(key===norm("CAJAMARCA")?'mid':'left'))};
+        let xEnd,yEnd,tx,ty,align;
+        if(key===norm("CAJAMARCA")){
+          xEnd=pA[0]; yEnd=pA[1]-CAJ_VERTICAL_UP; tx=xEnd; ty=yEnd-6; align='left';
+        }else if(RIGHT_COL.has(key)){
+          xEnd=colR; yEnd=pA[1]; tx=xEnd+6; ty=yEnd; align='left';
+        }else{
+          xEnd=colL; yEnd=pA[1]; tx=xEnd-6; ty=yEnd; align='right';
+        }
 
-        if(itm.side==='mid'){
-          // Cajamarca: líder vertical hacia arriba
-          itm.pA[1] -= CAJ_VERTICAL_UP;
-          // reubicar el punto original para que la línea salga desde el departamento
-          const base = chart.convertToPixel({geoIndex:0}, lonlat);
-          itm.pDot = [base[0]+(POINT_SHIFT[key]?.[0]||0), base[1]+(POINT_SHIFT[key]?.[1]||0)];
-          caj = itm;
-        }else if(itm.side==='right'){ right.push(itm); } else { left.push(itm); }
+        elements.push({type:'line',silent:true,shape:{x1:pA[0],y1:pA[1],x2:xEnd,y2:yEnd},style:{stroke:'#2b2b2b',lineWidth:1.4}});
+        elements.push({type:'circle',silent:true,shape:{cx:pA[0],cy:pA[1],r:4},style:{fill:'#0ea5e9'}});
+        elements.push({type:'text',silent:true,style:{
+          x:tx,y:ty,text:`{nm|${name}}  {vv|${nf(v)}}`,textAlign:align,
+          rich:{nm:{fontSize:12,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:12,fill:'#0ea5e9',fontWeight:700}}
+        }});
       }
 
       const order=[
@@ -240,70 +180,14 @@
         "MADRE DE DIOS","CUSCO","APURIMAC","PUNO","TACNA"
       ];
       const seen=new Set();
-      order.forEach(n=>{ collect(n); seen.add(norm(n)); });
-      bases.forEach((_,k)=>{ if(!seen.has(k) && (LEFT_COL.has(k)||RIGHT_COL.has(k)||k===norm("CAJAMARCA"))) collect(k); });
-
-      // 1) Asegura puntos dentro del polígono (antes de colisión)
-      left.forEach(nudgeInside);
-      right.forEach(nudgeInside);
-
-      // 2) Anti-colisión: movemos el Y del PUNTO (líneas horizontales)
-      spread(left,  yMin, yMax, minGap);
-      spread(right, yMin, yMax, minGap);
-
-      // tras mover Y, volvemos a asegurar interior con un pequeño ajuste horizontal
-      function slideInto(it){
-        // intentamos un micro-empate hacia el centro (máx 12px)
-        const tries=6, step=2;
-        for(let i=0;i<tries;i++){
-          const ll = chart.convertFromPixel({geoIndex:0}, it.pA);
-          const ring = ringsMap.get(it.key);
-          if(!ring || pointInRing(ll, ring)) break;
-          const dx = it.pC[0]-it.pA[0], dy = it.pC[1]-it.pA[1];
-          const d = Math.hypot(dx,dy)||1;
-          it.pA[0] += (dx/d)*step;
-          // el Y ya está fijado por el spread -> mantiene línea horizontal
-        }
-      }
-      left.forEach(slideInto);
-      right.forEach(slideInto);
-
-      const elements=[];
-
-      function drawItem(it){
-        const xEnd = it.side==='right' ? Math.round(W * COL_RIGHT_PCT) : Math.round(W * COL_LEFT_PCT);
-        const yLine = Math.round(it.pA[1]); // línea horizontal
-        const align = it.side==='right' ? 'left' : 'right';
-        const tx = align==='left' ? xEnd+6 : xEnd-6;
-
-        elements.push({type:'line',silent:true,shape:{x1:it.pA[0],y1:it.pA[1],x2:xEnd,y2:yLine},style:{stroke:'#2b2b2b',lineWidth:1.4}});
-        elements.push({type:'circle',silent:true,shape:{cx:it.pA[0],cy:it.pA[1],r:4},style:{fill:'#0ea5e9'}});
-        elements.push({type:'text',silent:true,style:{
-          x:tx,y:yLine,text:`{nm|${it.name}}  {vv|${nf(it.v)}}`,textAlign:align,
-          rich:{nm:{fontSize:fs,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:fs,fill:'#0ea5e9',fontWeight:700}}
-        }});
-      }
-
-      left.forEach(drawItem);
-      right.forEach(drawItem);
-
-      if(caj){
-        // punto real en el depa y etiqueta arriba (vertical recta)
-        const base = caj.pDot;
-        const topY = Math.max(yMin, caj.pA[1]);
-        elements.push({type:'line',silent:true,shape:{x1:base[0],y1:base[1],x2:base[0],y2:topY},style:{stroke:'#2b2b2b',lineWidth:1.4}});
-        elements.push({type:'circle',silent:true,shape:{cx:base[0],cy:base[1],r:4},style:{fill:'#0ea5e9'}});
-        elements.push({type:'text',silent:true,style:{
-          x:base[0],y:topY-6,text:`{nm|${caj.name}}  {vv|${nf(caj.v)}}`,textAlign:'left',
-          rich:{nm:{fontSize:fs,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:fs,fill:'#0ea5e9',fontWeight:700}}
-        }});
-      }
+      order.forEach(n=>{ addDept(n); seen.add(norm(n)); });
+      bases.forEach((_,k)=>{ if(!seen.has(k) && (LEFT_COL.has(k)||RIGHT_COL.has(k)||k===norm("CAJAMARCA"))) addDept(k); });
 
       chart.setOption({graphic:elements},{replaceMerge:['graphic']});
     }
 
     draw();
-    chart.off('finished'); // evitamos repintado en bucle
+    chart.on('finished', draw);
   }catch(err){
     showErr(err?.message || String(err));
   }
@@ -311,6 +195,7 @@
 </script>
 </body>
 </html>
+
 
 
 
