@@ -13,11 +13,20 @@
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
     overflow:hidden; /* evita barras en el embed */
   }
-  /* Alto similar al del StoryMap de tu captura */
+  /* Contenedor responsive: misma “sensación” de tamaño del ideal en StoryMap */
   #chart{
     width:100%;
-    height:860px;   /* ajusta si quieres: 700–900px suele ir perfecto */
+    aspect-ratio: 2.1 / 1;   /* ajusta si deseas (1.9–2.2 funciona bien) */
+    height:auto;              /* el alto lo da la proporción */
+    min-height:640px;         /* respiración para etiquetas */
   }
+  @media (max-width: 900px){
+    #chart{ aspect-ratio: 1.9 / 1; min-height:520px; }
+  }
+  @media (max-width: 600px){
+    #chart{ aspect-ratio: 1.7 / 1; min-height:460px; }
+  }
+
   #err{
     position:fixed;left:10px;bottom:10px;display:none;background:#fff;border:1px solid #fecaca;color:#b91c1c;
     padding:8px 10px;border-radius:8px;font-size:12px;max-width:min(560px,92%);white-space:pre-wrap
@@ -128,7 +137,10 @@
       tooltip:{ show:false },
       geo:{
         map:'peru', roam:false, silent:true, label:{show:false}, emphasis:{disabled:true},
-        aspectScale:1.18, layoutCenter:['50%','55%'], layoutSize:'90%',
+        aspectScale:1.18,
+        /* ↓↓↓ Centrado y tamaño pensados para StoryMap (evita que se corte) */
+        layoutCenter:['50%','58%'],
+        layoutSize:'86%',
         itemStyle:{ borderColor:'#222', borderWidth:1.2, areaColor:'#f6f9ff' }
       }
     });
@@ -195,8 +207,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
