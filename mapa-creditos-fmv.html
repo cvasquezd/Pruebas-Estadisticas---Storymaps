@@ -6,26 +6,14 @@
 <title>Mapa MiVivienda (responsive)</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
-  html,body{
-    height:100%;
-    margin:0;
-    background:#fff;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-    overflow:hidden; /* evita barras en el embed */
+  /* Que todo herede la altura del iframe (tarjeta StoryMap) */
+  html, body { width:100%; height:100%; margin:0; background:#fff;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;
   }
-  /* Contenedor responsive: misma “sensación” de tamaño del ideal en StoryMap */
-  #chart{
-    width:100%;
-    aspect-ratio: 2.1 / 1;   /* ajusta si deseas (1.9–2.2 funciona bien) */
-    height:auto;              /* el alto lo da la proporción */
-    min-height:640px;         /* respiración para etiquetas */
-  }
-  @media (max-width: 900px){
-    #chart{ aspect-ratio: 1.9 / 1; min-height:520px; }
-  }
-  @media (max-width: 600px){
-    #chart{ aspect-ratio: 1.7 / 1; min-height:460px; }
-  }
+  /* Un wrapper con posición relativa y 100% del alto disponible */
+  #wrap { position:relative; width:100%; height:100%; }
+  /* El chart ocupa todo el wrapper (no usa vh) */
+  #chart { position:absolute; inset:0; width:100%; height:100%; }
 
   #err{
     position:fixed;left:10px;bottom:10px;display:none;background:#fff;border:1px solid #fecaca;color:#b91c1c;
@@ -34,7 +22,9 @@
 </style>
 </head>
 <body>
-<div id="chart" role="img" aria-label="Mapa de viviendas promovidas por departamento"></div>
+<div id="wrap">
+  <div id="chart" role="img" aria-label="Mapa de viviendas promovidas por departamento"></div>
+</div>
 <div id="err"></div>
 
 <script>
@@ -122,10 +112,11 @@
 
   const chart=echarts.init(document.getElementById('chart'));
 
-  // Redibuja cuando cambie el tamaño del contenedor (StoryMap)
+  // Resize confiable dentro del iframe del StoryMap
   const ro = new ResizeObserver(()=>{ chart.resize(); draw(); });
-  ro.observe(document.getElementById('chart'));
+  ro.observe(document.getElementById('wrap'));
   window.addEventListener('orientationchange', ()=>setTimeout(()=>{chart.resize(); draw();}, 150), {passive:true});
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ setTimeout(()=>{chart.resize(); draw();}, 100); } });
 
   chart.showLoading('default',{text:'Cargando…'});
 
@@ -138,9 +129,8 @@
       geo:{
         map:'peru', roam:false, silent:true, label:{show:false}, emphasis:{disabled:true},
         aspectScale:1.18,
-        /* ↓↓↓ Centrado y tamaño pensados para StoryMap (evita que se corte) */
-        layoutCenter:['50%','58%'],
-        layoutSize:'86%',
+        layoutCenter:['50%','55%'], /* mismo esquema */
+        layoutSize:'90%',
         itemStyle:{ borderColor:'#222', borderWidth:1.2, areaColor:'#f6f9ff' }
       }
     });
@@ -199,7 +189,11 @@
     }
 
     draw();
-    chart.on('finished', draw);
+
+    /* Resizes extra por si StoryMap reacomoda la tarjeta después de cargar */
+    setTimeout(()=>{ chart.resize(); draw(); }, 250);
+    setTimeout(()=>{ chart.resize(); draw(); }, 800);
+
   }catch(err){
     showErr(err?.message || String(err));
   }
@@ -207,3 +201,4 @@
 </script>
 </body>
 </html>
+
