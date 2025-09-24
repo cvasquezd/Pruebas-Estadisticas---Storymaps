@@ -34,6 +34,7 @@
   const SERVICE   = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/mapa_swipe_viviendas_promovidas_storymap_hosted/FeatureServer";
   const LYR_LIMIT = 1, TBL_VAL = 6, COD_VAR = 70, YEAR = 2024;
 
+  /* ===== Layout original (sin cambios de esquema) ===== */
   const COL_LEFT_PCT  = 0.18;
   const COL_RIGHT_PCT = 0.84;
 
@@ -55,6 +56,7 @@
   ]);
   const CAJ_VERTICAL_UP = 120;
 
+  /* ===== Utilidades ===== */
   const qs=(u,p)=>u+"?"+new URLSearchParams(p).toString();
   const nf=v=>new Intl.NumberFormat('es-PE').format(v||0);
   const N=s=>(s||"").toUpperCase().normalize("NFD").replace(/\p{Diacritic}/gu,"").replace(/\s+/g," ").trim();
@@ -112,12 +114,16 @@
     return {vals,prettyTab};
   }
 
+  /* ===== Inicializa ECharts ===== */
   const chart=echarts.init(document.getElementById('chart'));
 
-  // Redibuja cuando cambie el tamaño del contenedor (StoryMap)
-  const ro = new ResizeObserver(()=>{ chart.resize(); draw(); });
+  // Debounce para redimensionamientos dentro del iframe de StoryMap
+  let resizeTimer=null;
+  const debounced = (fn,ms=120)=>{ clearTimeout(resizeTimer); resizeTimer=setTimeout(fn,ms); };
+
+  const ro = new ResizeObserver(()=>{ chart.resize(); debounced(()=>draw()); });
   ro.observe(document.getElementById('chart'));
-  window.addEventListener('orientationchange', ()=>setTimeout(()=>{chart.resize(); draw();}, 150), {passive:true});
+  window.addEventListener('orientationchange', ()=>debounced(()=>{chart.resize(); draw();}, 150), {passive:true});
 
   chart.showLoading('default',{text:'Cargando…'});
 
@@ -135,15 +141,52 @@
     });
     chart.hideLoading();
 
+    /* ==== Anti-colisión por columna (ajuste sólo de Y) ==== */
+    function spreadLines(items, yMin, yMax, minGap){
+      // items: [{yOrig, pA:[x,y], label, value, side}]
+      items.sort((a,b)=>a.yOrig-b.yOrig);
+      let yPrev = yMin - minGap;
+      for(const it of items){
+        const yTarget = Math.max(it.yOrig, yPrev + minGap);
+        it.y = Math.min(yTarget, yMax);
+        yPrev = it.y;
+      }
+      // Si el último chocó con yMax, “empujamos” hacia arriba
+      for(let i=items.length-2;i>=0;i--){
+        if(items[i].y + minGap > items[i+1].y){
+          items[i].y = Math.max(yMin, items[i+1].y - minGap);
+        }
+      }
+      return items;
+    }
+
     function draw(){
       const W=chart.getWidth();
+      const H=chart.getHeight();
+
       const colL = Math.round(W * COL_LEFT_PCT);
       const colR = Math.round(W * COL_RIGHT_PCT);
+
+      // Márgenes verticales para que no corten con bordes del iframe/toolbars
+      const topPad = Math.max(20, H*0.05);
+      const botPad = Math.max(24, H*0.06);
+      const yMin = topPad;
+      const yMax = H - botPad;
+
+      // Gap mínimo entre rótulos (responsive)
+      const minGap = Math.max(16, Math.min(28, Math.round(H/26)));
+
+      // Font size responsive (manteniendo estética)
+      const fs = Math.max(11, Math.min(13, Math.round(W/90)));
 
       const elements=[];
       const norm=s=>N(s);
 
-      function addDept(label){
+      const leftItems=[];  // para anti-colisión
+      const rightItems=[];
+      let cajamarcaItem=null;
+
+      function addDeptToList(label){
         const key = norm(label);
         const baseKey = (key===norm("SAN MARTIN")) ? (bases.has(norm("SAN MARTÍN"))?norm("SAN MARTÍN"):key) : key;
         const lonlat = bases.get(baseKey); if(!lonlat) return;
@@ -156,21 +199,13 @@
         let v    = (key===norm("SAN MARTIN")) ? (vals.get(norm("SAN MARTÍN")) ?? vals.get(key)) : vals.get(key);
         v = v==null ? 0 : v;
 
-        let xEnd,yEnd,tx,ty,align;
         if(key===norm("CAJAMARCA")){
-          xEnd=pA[0]; yEnd=pA[1]-CAJ_VERTICAL_UP; tx=xEnd; ty=yEnd-6; align='left';
+          cajamarcaItem = {key,name,v,pA, yOrig:pA[1]-CAJ_VERTICAL_UP, side:'mid'};
         }else if(RIGHT_COL.has(key)){
-          xEnd=colR; yEnd=pA[1]; tx=xEnd+6; ty=yEnd; align='left';
+          rightItems.push({key,name,v,pA, yOrig:pA[1], side:'right'});
         }else{
-          xEnd=colL; yEnd=pA[1]; tx=xEnd-6; ty=yEnd; align='right';
+          leftItems.push({key,name,v,pA, yOrig:pA[1], side:'left'});
         }
-
-        elements.push({type:'line',silent:true,shape:{x1:pA[0],y1:pA[1],x2:xEnd,y2:yEnd},style:{stroke:'#2b2b2b',lineWidth:1.4}});
-        elements.push({type:'circle',silent:true,shape:{cx:pA[0],cy:pA[1],r:4},style:{fill:'#0ea5e9'}});
-        elements.push({type:'text',silent:true,style:{
-          x:tx,y:ty,text:`{nm|${name}}  {vv|${nf(v)}}`,textAlign:align,
-          rich:{nm:{fontSize:12,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:12,fill:'#0ea5e9',fontWeight:700}}
-        }});
       }
 
       const order=[
@@ -181,14 +216,48 @@
         "MADRE DE DIOS","CUSCO","APURIMAC","PUNO","TACNA"
       ];
       const seen=new Set();
-      order.forEach(n=>{ addDept(n); seen.add(norm(n)); });
-      bases.forEach((_,k)=>{ if(!seen.has(k) && (LEFT_COL.has(k)||RIGHT_COL.has(k)||k===norm("CAJAMARCA"))) addDept(k); });
+      order.forEach(n=>{ addDeptToList(n); seen.add(norm(n)); });
+      bases.forEach((_,k)=>{ if(!seen.has(k) && (LEFT_COL.has(k)||RIGHT_COL.has(k)||k===norm("CAJAMARCA"))) addDeptToList(k); });
+
+      // Aplica anti-colisión
+      spreadLines(leftItems,  yMin, yMax, minGap);
+      spreadLines(rightItems, yMin, yMax, minGap);
+      if(cajamarcaItem){
+        // Clampeo suave para Cajamarca
+        cajamarcaItem.y = Math.min(Math.max(cajamarcaItem.yOrig, yMin), yMax);
+      }
+
+      function pushGraphic(item){
+        const align = item.side==='right' ? 'left' : 'right';
+        const xEnd  = item.side==='right' ? colR : (item.side==='left' ? colL : item.pA[0]);
+        const yEnd  = item.y;
+
+        elements.push({type:'line',silent:true,shape:{x1:item.pA[0],y1:item.pA[1],x2:xEnd,y2:yEnd},style:{stroke:'#2b2b2b',lineWidth:1.4}});
+        elements.push({type:'circle',silent:true,shape:{cx:item.pA[0],cy:item.pA[1],r:4},style:{fill:'#0ea5e9'}});
+        const tx = align==='left' ? xEnd+6 : xEnd-6;
+        elements.push({type:'text',silent:true,style:{
+          x:tx,y:yEnd,text:`{nm|${item.name}}  {vv|${nf(item.v)}}`,textAlign:align,
+          rich:{nm:{fontSize:fs,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:fs,fill:'#0ea5e9',fontWeight:700}}
+        }});
+      }
+
+      leftItems.forEach(pushGraphic);
+      rightItems.forEach(pushGraphic);
+      if(cajamarcaItem){
+        // Etiqueta de Cajamarca arriba, sin alterar tu diseño
+        elements.push({type:'line',silent:true,shape:{x1:cajamarcaItem.pA[0],y1:cajamarcaItem.pA[1],x2:cajamarcaItem.pA[0],y2:cajamarcaItem.y},style:{stroke:'#2b2b2b',lineWidth:1.4}});
+        elements.push({type:'circle',silent:true,shape:{cx:cajamarcaItem.pA[0],cy:cajamarcaItem.pA[1],r:4},style:{fill:'#0ea5e9'}});
+        elements.push({type:'text',silent:true,style:{
+          x:cajamarcaItem.pA[0],y:cajamarcaItem.y-6,text:`{nm|${cajamarcaItem.name}}  {vv|${nf(cajamarcaItem.v)}}`,textAlign:'left',
+          rich:{nm:{fontSize:fs,fill:'#2b2b2b',fontWeight:500},vv:{fontSize:fs,fill:'#0ea5e9',fontWeight:700}}
+        }});
+      }
 
       chart.setOption({graphic:elements},{replaceMerge:['graphic']});
     }
 
     draw();
-    chart.on('finished', draw);
+    chart.off('finished'); // evita bucle; redibujamos sólo en resize/debounce
   }catch(err){
     showErr(err?.message || String(err));
   }
@@ -196,5 +265,6 @@
 </script>
 </body>
 </html>
+
 
 
