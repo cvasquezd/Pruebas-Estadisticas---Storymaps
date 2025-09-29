@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Evolución del avance por región y nivel de gobierno</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
+    #wrap{position:relative;height:100vh;width:100vw;display:flex;flex-direction:column}
+    .topbar{position:relative;z-index:10;padding:10px 12px 4px;display:flex;flex-direction:column;align-items:center;gap:10px}
+    .title{font-weight:700;font-size:16px;line-height:1.1;margin:0}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+    .tab{font-size:12px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#111827;
+         padding:6px 12px;border-radius:999px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.06);user-select:none}
+    .tab.active{color:#fff;border-color:transparent}
+    .tab[data-level="GOBIERNO NACIONAL"].active{background:#014F99}
+    .tab[data-level="GOBIERNO REGIONAL"].active{background:#E30713}
+    .tab[data-level="GOBIERNO LOCAL"].active{background:#22c55e}
+    .tab[data-level="SIN ESPECIFICAR"].active{background:#9e9e9e}
+    #chart{height:100%;width:100%}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div class="topbar">
+    <h1 class="title">Evolución del avance por región y nivel de gobierno</h1>
+    <div class="tabs" id="tabs"></div>
+  </div>
+  <div id="chart"></div>
+</div>
+
+<script>
+/* ===== Config ===== */
+const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
+const LAYER_ID     = 14;   // tb_mef_presupuesto_ejecucion_gasto_funcion_da
+const YEAR_START   = 1999;
+const YEAR_END     = 2025;
+
+const COLORS_BY_NIVEL = {
+  "GOBIERNO NACIONAL": "#014F99",
+  "GOBIERNO REGIONAL": "#E30713",
+  "GOBIERNO LOCAL":    "#22c55e",
+  "SIN ESPECIFICAR":   "#9e9e9e"
+};
+const DOT_BORDER = { color:'#0f172a', width:0.8, type:'solid', opacity:0.95 };
+
+/* ===== Utils ===== */
+function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+function parseNum(v){ const n = Number(v); return Number.isFinite(n) ? n : NaN; }
+function extent(a){ let m=+Infinity,M=-Infinity; for(const v of a){ if(Number.isFinite(v)){ if(v<m)m=v; if(v>M)M=v; } }
+  if(!Number.isFinite(m)||!Number.isFinite(M)) return [0,1]; if(m===M) return [0, M||1]; return [m,M]; }
+function quantile(a,q){ const s=a.slice().filter(Number.isFinite).sort((x,y)=>x-y); if(!s.length) return NaN;
+  const p=(s.length-1)*q, lo=Math.floor(p), hi=Math.ceil(p); return lo===hi?s[lo]:s[lo]+(s[hi]-s[lo])*(p-lo); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function makeSizeFn(vals, minPx=8, maxPx=74){ const [mn,mx]=extent(vals);
+  return x=>{ const v=Math.max(0,Number(x)||0); let t=(mx>mn)?(v-mn)/(mx-mn):0.5; t=clamp(t,0,1); return minPx+Math.sqrt(t)*(maxPx-minPx); }; }
+const moneyFmt = (()=>{
+  const nf=new Intl.NumberFormat('es-PE',{style:'currency',currency:'PEN',maximumFractionDigits:0});
+  return v=>nf.format(v).replace('S/.','S/').replace('PEN','S/');
+})();
+function normalizeNivel(s){
+  const raw = (s||'').toString().trim().toUpperCase().replace(/\s+/g,' ').replace(/\./g,'');
+  if(/NAC(IONAL)?/.test(raw)) return "GOBIERNO NACIONAL";
+  if(/REG(IONAL)?/.test(raw)) return "GOBIERNO REGIONAL";
+  if(/LOC(AL)?/.test(raw)) return "GOBIERNO LOCAL";
+  if(/SIN\s*ESPEC/.test(raw)) return "SIN ESPECIFICAR";
+  if(raw.includes("NACIONAL")) return "GOBIERNO NACIONAL";
+  if(raw.includes("REGIONAL")) return "GOBIERNO REGIONAL";
+  if(raw.includes("LOCAL"))    return "GOBIERNO LOCAL";
+  return "SIN ESPECIFICAR";
+}
+function colorForNivel(n){ return COLORS_BY_NIVEL[normalizeNivel(n)] || COLORS_BY_NIVEL["SIN ESPECIFICAR"]; }
+
+/* ===== Consulta agregada en el servidor ===== */
+async function fetchAggregated(){
+  const outStats = JSON.stringify([
+    { "statisticType":"sum", "onStatisticField":"monto_pim",       "outStatisticFieldName":"pim_sum" },
+    { "statisticType":"sum", "onStatisticField":"monto_devengado", "outStatisticFieldName":"dev_sum" }
+  ]);
+  const url = qs(`${SERVICE_BASE}/${LAYER_ID}/query`, {
+    where: `ano_eje >= ${YEAR_START} AND ano_eje <= ${YEAR_END}`,
+    groupByFieldsForStatistics: "ano_eje,departamento_meta_nombre,nivel_gobierno_nombre",
+    outFields: "ano_eje,departamento_meta_nombre,nivel_gobierno_nombre",
+    outStatistics: outStats,
+    orderByFields: "ano_eje,departamento_meta_nombre",
+    returnGeometry: "false",
+    f: "json"
+  });
+  const res = await fetch(url, { cache: "no-store" });
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if(json.error) throw new Error(json.error.message || "Error del servicio");
+
+  const byYear = new Map();
+  const presentLevels = new Set();
+
+  for(const ft of (json.features||[])){
+    const a = ft.attributes || {};
+    const year  = parseNum(a.ano_eje);
+    const dep   = (a.departamento_meta_nombre || "").toString().trim();
+    const nivel = normalizeNivel(a.nivel_gobierno_nombre);
+    const pim   = parseNum(a.pim_sum);
+    const dev   = parseNum(a.dev_sum);
+    if(!Number.isFinite(year) || !dep) continue;
+
+    presentLevels.add(nivel);
+    const avance = (Number.isFinite(pim) && pim>0 && Number.isFinite(dev)) ? (dev/pim)*100 : NaN;
+    const point = { year, dep, nivel, pim, dev, avance };
+
+    if(!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year).push(point);
+  }
+
+  const years = Array.from(byYear.keys()).sort((a,b)=>a-b);
+  return { byYear, years, presentLevels: Array.from(presentLevels) };
+}
+
+/* ===== Render ===== */
+(function(){
+  const chart = echarts.init(document.getElementById('chart'));
+  const p0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits:0 });
+  const p2 = new Intl.NumberFormat('es-PE', { maximumFractionDigits:2 });
+
+  function buildOption(byYear, years, nivelFiltrado){
+    // Filtrar años que SÍ tienen al menos un punto del nivel seleccionado
+    const yearsFiltered = years.filter(y => (byYear.get(y)||[]).some(p => p.nivel === nivelFiltrado));
+    if(!yearsFiltered.length){
+      return {
+        baseOption:{ series:[{type:'scatter', data:[]}] },
+        options:[],
+        graphic:{ type:'text', left:'center', top:'middle',
+          style:{ text:'Sin datos para el nivel seleccionado.', fontSize:14, fill:'#6b7280' } }
+      };
+    }
+
+    // Recalcular rangos usando SOLO los puntos del nivel
+    const allX=[], allY=[], allSize=[];
+    yearsFiltered.forEach(y=>{
+      for(const p of (byYear.get(y)||[])){
+        if(p.nivel !== nivelFiltrado) continue;
+        if(Number.isFinite(p.pim)) allX.push(p.pim), allSize.push(p.pim);
+        if(Number.isFinite(p.avance)) allY.push(p.avance);
+      }
+    });
+
+    const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
+    const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
+    const xPad=(xQ95-xQ05)*0.08, yPad=(yQ95-yQ05)*0.06;
+    const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
+    const xInitMin = Math.max(0, Math.min(xQ05 - xPad, xMinAll));
+    const xInitMax = Math.max(xQ95 + xPad, xMaxAll);
+    const yInitMin = 0;
+    const yInitMax = Math.min(100, Math.max((yQ95+yPad), yMaxAll, 20));
+    const sizeFn = makeSizeFn(allSize, 8, 74);
+
+    const options = yearsFiltered.map(y=>{
+      const points = (byYear.get(y)||[])
+        .filter(p => p.nivel === nivelFiltrado)
+        .map(p=>({
+          value:[p.pim, p.avance, p.dep, p.nivel, y],
+          itemStyle:{
+            color: colorForNivel(p.nivel),
+            opacity: DOT_BORDER.opacity,
+            borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width, borderType: DOT_BORDER.type
+          },
+          emphasis:{
+            itemStyle:{ borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width+0.6, borderType: DOT_BORDER.type },
+            scale:1.08, focus:'self'
+          },
+          label:{ show:true, formatter:(o)=>o.value[2], position:'right', fontSize:10, color:'#333' }
+        }));
+
+      return {
+        // Sin títulos dentro del gráfico
+        series:[{ name:String(y), type:'scatter', data:points, symbolSize:(val)=>sizeFn(val[0]) }]
+      };
+    });
+
+    return {
+      baseOption:{
+        timeline:{
+          axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
+          playInterval:2200, right:0, top:20, bottom:20, width:60, symbol:'none',
+          checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
+          data: yearsFiltered
+        },
+        tooltip:{
+          padding:6, borderWidth:1, trigger:'item',
+          formatter:(obj)=>{
+            const [pim, avance, dep, nivel, year] = obj.value;
+            const xTxt = Number.isFinite(pim)    ? moneyFmt(pim) : '—';
+            const yTxt = Number.isFinite(avance) ? p2.format(avance) + '%' : '—';
+            return `
+              <b>${dep}</b><br>
+              Nivel: <b>${nivel}</b><br>
+              Año: <b>${year}</b><br>
+              % Avance (Y): <b>${yTxt}</b><br>
+              PIM (X): <b>${xTxt}</b>
+            `;
+          }
+        },
+        grid:{ top:16, left:60, right:150, bottom:90, containLabel:true },
+        xAxis:{ type:'value', name:'PIM (S/)', nameGap:25, nameLocation:'middle',
+          min:xInitMin, max:xInitMax, scale:true, splitLine:{ show:true },
+          axisLabel:{ formatter:(v)=> moneyFmt(v) } },
+        yAxis:{ type:'value', name:'% Avance', min:yInitMin, max:yInitMax, scale:false, splitLine:{ show:true },
+          axisLabel:{ formatter:(v)=> `${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
+        dataZoom:[
+          { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
+          { type:'inside', xAxisIndex:0, filterMode:'none' },
+          { type:'slider', yAxisIndex:0, filterMode:'none', right:6, width:12 },
+          { type:'inside', yAxisIndex:0, filterMode:'none' }
+        ],
+        series:[{ type:'scatter', data:[] }],
+        animationDurationUpdate:800,
+        animationEasingUpdate:'quinticInOut'
+      },
+      options
+    };
+  }
+
+  function buildTabs(presentLevels, onSelect){
+    const order = ["GOBIERNO NACIONAL","GOBIERNO REGIONAL","GOBIERNO LOCAL","SIN ESPECIFICAR"];
+    const levels = order.filter(l => presentLevels.includes(l));
+    const tabsEl = document.getElementById('tabs');
+    tabsEl.innerHTML = '';
+    levels.forEach((lvl, i)=>{
+      const b = document.createElement('button');
+      b.className = 'tab' + (i===0 ? ' active' : '');
+      b.dataset.level = lvl;
+      b.textContent = lvl.replace('GOBIERNO ','Gobierno ');
+      b.addEventListener('click', ()=>{
+        [...tabsEl.children].forEach(x=>x.classList.remove('active'));
+        b.classList.add('active');
+        onSelect(lvl);
+      });
+      tabsEl.appendChild(b);
+    });
+    return levels[0] || "GOBIERNO NACIONAL";
+  }
+
+  (async ()=>{
+    try{
+      chart.showLoading({ text: "Cargando datos…" });
+      const { byYear, years, presentLevels } = await fetchAggregated();
+      if(!years.length) throw new Error("Sin datos en el rango de años indicado.");
+
+      const initialLevel = buildTabs(presentLevels, (lvl)=>{
+        const opt = buildOption(byYear, years, lvl);
+        chart.setOption(opt, true); // notMerge para resetear timeline/axes
+      });
+
+      const initialOpt = buildOption(byYear, years, initialLevel);
+      chart.hideLoading();
+      chart.setOption(initialOpt, true);
+
+      window.addEventListener('resize', ()=>chart.resize());
+    }catch(err){
+      console.error(err);
+      chart.hideLoading();
+      chart.setOption({
+        graphic:{ type:'text', left:'center', top:'middle',
+          style:{ text:(err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
+      });
+    }
+  })();
+})();
+</script>
+</body>
+</html>
