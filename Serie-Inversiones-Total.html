@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PIM total — SANEAMIENTO (PROYECTO)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;overflow:hidden;background:#ffffff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #chart{width:100%;height:100%}
+    #err{
+      position:absolute;left:6px;bottom:6px;display:none;
+      background:rgba(255,255,255,.9);color:#b91c1c;font-size:11px;
+      padding:6px 8px;border-radius:6px;max-width:92%;white-space:pre-wrap
+    }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <div id="err"></div>
+
+<script>
+(async function(){
+  // ===== Servicio ArcGIS =====================================================
+  const BASE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
+  const LAYER_ID = 14; // tb_mef_presupuesto_ejecucion_gasto_funcion_da
+  const QUERY_URL = `${BASE}/${LAYER_ID}/query`;
+
+  // Campos
+  const YEAR_FIELD   = "ano_eje";
+  const VALUE_FIELD  = "monto_pim";
+
+  // Filtros
+  const WHERE = "funcion_nombre = 'SANEAMIENTO' AND tipo_act_proy_nombre = 'PROYECTO'";
+
+  // ========= utilidades ======================================================
+  const $err = document.getElementById('err');
+  const showErr = (m)=>{ $err.style.display='block'; $err.textContent=m; };
+  const qs = (url, params)=> url + "?" + new URLSearchParams(params).toString();
+
+  const nfCompact  = new Intl.NumberFormat('es-PE', { notation:'compact', maximumFractionDigits:1 });
+  const nfCurrency = new Intl.NumberFormat('es-PE', { style:'currency', currency:'PEN', maximumFractionDigits:0 });
+  const nfInt      = new Intl.NumberFormat('es-PE', { maximumFractionDigits:0 });
+
+  // Etiqueta en millones: "S/ 189 mill"
+  const fmtLabelMill = (v)=>{
+    if (v == null || !isFinite(v)) return '';
+    const m = Math.round(+v/1e6);
+    return `S/ ${nfInt.format(m)} mill`;
+  };
+
+  // Paginación y agregado (sum por año: única serie total)
+  async function fetchTotalsByYear(){
+    const pageSize = 2000;
+    let offset = 0, done = false, all = [];
+
+    while(!done){
+      const url = qs(QUERY_URL, {
+        where: WHERE,
+        returnGeometry: "false",
+        groupByFieldsForStatistics: `${YEAR_FIELD}`, // SOLO año
+        outStatistics: JSON.stringify([{
+          statisticType: "sum",
+          onStatisticField: VALUE_FIELD,
+          outStatisticFieldName: "sum_pim"
+        }]),
+        outFields: `${YEAR_FIELD}`,
+        orderByFields: `${YEAR_FIELD} ASC`,
+        f: "json",
+        resultOffset: offset,
+        resultRecordCount: pageSize
+      });
+
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      if(json.error) throw new Error(json.error.message || "Error del servicio");
+
+      const feats = json.features || [];
+      all = all.concat(feats.map(f => f.attributes));
+      if (feats.length < pageSize) done = true; else offset += pageSize;
+    }
+
+    return all
+      .filter(r => r && r[YEAR_FIELD] != null)
+      .map(r => ({ year: Number(r[YEAR_FIELD]), val: Number(r.sum_pim ?? 0) }));
+  }
+
+  // ========= ECharts =========================================================
+  const chart = echarts.init(document.getElementById('chart'));
+  chart.showLoading('default', { text:'Cargando…' });
+
+  // (sin ocultar labels en responsive)
+  function applyResponsive(){
+    const w = chart.getWidth();
+    const xs = w < 360, sm = w>=360 && w<520;
+    chart.setOption({
+      grid: xs ? { left:60,right:14,top:50,bottom:50,containLabel:true }
+           : sm ? { left:68,right:20,top:56,bottom:54,containLabel:true }
+                 : { left:72,right:28,top:58,bottom:56,containLabel:true },
+      legend: { textStyle: { fontSize: xs ? 11 : 12 } },
+      xAxis:  { axisLabel: { fontSize: xs ? 11 : 12, margin: xs ? 10 : 12 }, nameGap: xs ? 22 : 28 },
+      yAxis:  { axisLabel: { fontSize: xs ? 11 : 12, margin: xs ? 8 : 10 }, nameTextStyle: { fontSize: xs ? 11 : 12 } }
+    });
+  }
+
+  const ro = 'ResizeObserver' in window ? new ResizeObserver(() => { chart.resize(); applyResponsive(); }) : null;
+  if (ro) ro.observe(document.getElementById('chart'));
+  window.addEventListener('resize', () => { chart.resize(); applyResponsive(); }, { passive:true });
+
+  try{
+    const rows = await fetchTotalsByYear();
+    if (!rows.length) { chart.hideLoading(); showErr("No se recibieron registros para la consulta con los filtros aplicados."); return; }
+
+    // Años y valores
+    const rawYears = Array.from(new Set(rows.map(r => r.year))).sort((a,b)=>a-b).map(String);
+
+    // Espaciador para alejar el primer valor del eje Y
+    const SPACER = '\u200B';
+    const years = [SPACER, ...rawYears];
+
+    // Mapa año -> total
+    const byYear = {};
+    rows.forEach(r => { byYear[String(r.year)] = (byYear[String(r.year)] ?? 0) + r.val; });
+
+    // Datos en formato [categoria, valor]
+    const lineData = years.map(y => [y, y===SPACER ? null : (byYear[y] ?? null)]);
+
+    // Y estable antes de pintar
+    const vals = lineData.map(d => d[1]).filter(v => v!=null && isFinite(v));
+    let yMin = 0, yMax = null;
+    if(vals.length){
+      const maxVal = Math.max(...vals);
+      const minVal = Math.min(...vals);
+      const padUp  = Math.max(maxVal * 0.08, 1);
+      const padDn  = Math.max((maxVal - minVal) * 0.02, 0);
+      yMin = Math.max(0, Math.floor(minVal - padDn));
+      yMax = Math.ceil(maxVal + padUp);
+    }
+
+    const TOTAL_DURATION = 8000; // animación de la línea
+
+    chart.setOption({
+      backgroundColor: '#ffffff',
+      grid: { left:72, right:28, top:58, bottom:56, containLabel:true },
+      legend: {
+        top: 10, left: 'center',
+        itemWidth: 14, itemHeight: 8, icon: 'roundRect',
+        textStyle: { fontSize: 12 },
+        data: ["Total"]
+      },
+      tooltip: {
+        trigger: 'axis', confine: true, axisPointer: { type:'line' },
+        formatter(params){
+          if(!params || !params.length) return '';
+          const year = params[0].axisValue;
+          if (year === SPACER) return '';
+          const p = params.find(pp => pp.seriesName === 'Total');
+          const v = p && p.data && p.data[1];
+          const vtxt = (v != null) ? nfCurrency.format(+v) : '—';
+          return `<b>${year}</b><br/>${p ? p.marker : '•'} Total: <b>${vtxt}</b>`;
+        }
+      },
+      xAxis: {
+        type: 'category',
+        boundaryGap: true,
+        name:'Años', nameLocation:'middle', nameGap:28,
+        axisTick: { alignWithLabel: true, show: true },
+        axisLine: { show: true },
+        axisLabel: {
+          fontSize: 12, margin: 12,
+          formatter: (val)=> val === SPACER ? '' : val
+        },
+        data: years
+      },
+      yAxis: {
+        type: 'value',
+        name:' PIM S/',
+        min: yMin,
+        max: yMax,
+        nameTextStyle:{ padding:[0,0,0,-6], fontSize:12 },
+        axisLine: { show: true },
+        axisTick: { show: true },
+        axisLabel: { fontSize: 12, margin: 10, formatter: v => nfCompact.format(v) },
+        splitLine:{ show:true }
+      },
+
+      // Línea anima; etiquetas SIEMPRE visibles
+      animation: true,
+      animationDuration: TOTAL_DURATION,
+      animationEasing: 'linear',
+      animationDurationUpdate: 600,
+      animationEasingUpdate: 'cubicOut',
+
+      series: [{
+        name: "Total",
+        type: 'line',
+        encode: { x: 0, y: 1 },
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 7,
+        smooth: false,
+        lineStyle: { width: 3 },
+        data: lineData,
+        label: {
+          show: true,                    // <<< etiquetas siempre visibles
+          formatter: (p)=> fmtLabelMill(p.data && p.data[1]),
+          position:'top',
+          distance: 10,
+          fontSize: 11
+        },
+        // Evitar que pisen bordes/ejes
+        labelLayout(params){
+          const rect = params.rect;
+          const lab  = params.labelRect;
+          const out = { x: lab.x, y: lab.y };
+          const PAD = 6;
+          if (lab.x < rect.x + PAD) out.x = rect.x + PAD;
+          if (lab.x + lab.width > rect.x + rect.width - PAD) out.x = rect.x + rect.width - lab.width - PAD;
+          if (lab.y + lab.height > rect.y + rect.height - PAD) out.y = rect.y + rect.height - lab.height - PAD;
+          return out;
+        }
+      }]
+    }, true);
+
+    chart.hideLoading();
+
+    chart.off('finished');
+    chart.on('finished', applyResponsive);
+    applyResponsive();
+
+  }catch(e){
+    chart.hideLoading();
+    console.error(e);
+    showErr("Error: " + (e && e.message ? e.message : e));
+  }
+})();
+</script>
+</body>
+</html>
