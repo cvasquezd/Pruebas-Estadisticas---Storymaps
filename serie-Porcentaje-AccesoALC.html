@@ -74,7 +74,8 @@
   window.addEventListener('resize', ()=>chart.resize());
   chart.setOption({
     backgroundColor: '#ffffff',
-    grid: { left: 96, right: 40, top: 68, bottom: 64, containLabel: true },
+    // más espacio inferior para labels debajo
+    grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
     legend: { top: 12, left: 'center', itemWidth: 18, itemHeight: 10, icon: 'roundRect', textStyle: { fontSize: 12 } },
     tooltip: {
       trigger: 'axis',
@@ -134,7 +135,7 @@
       const f_dvals  = resolveFieldName(layerInfo.data, ["d_valores","d valores","descripcion_valor"]);
       if(!(f_anio && f_ambito && f_val && f_region && f_ind && f_dvals)) throw new Error("Campos requeridos no hallados.");
 
-      // Filtros (id_indicador cambiado anteriormente a ind19_2)
+      // id_indicador de esta vista: ind19_2
       const WHERE = `(${f_region} = 'NACIONAL') AND (${f_ind} = 'ind19_2') AND (${f_dvals} = 'CON ACCESO')`;
       const res = await jsonp(tableUrl + "/query", {
         where: WHERE,
@@ -179,7 +180,7 @@
         seriesPrep.push({ name: ambito, data, mean });
       });
 
-      // Degradado por intensidad
+      // colores y tipo de línea por ámbito
       seriesPrep.sort((a,b)=> (b.mean||0)-(a.mean||0));
       const n = Math.max(1, seriesPrep.length);
       const minL = Math.max(18, baseHSL.l - 12);
@@ -191,7 +192,6 @@
         const isTotal  = /^total$/i.test(s.name);
         const isUrbano = /^urbano$/i.test(s.name);
         const isRural  = /^rural$/i.test(s.name);
-        // === CAMBIO SOLICITADO EN TIPOS DE LÍNEA ===
         const lineType = isTotal ? 'solid' : (isUrbano ? 'dashed' : (isRural ? 'dotted' : 'solid'));
         return {
           name: s.name,
@@ -208,7 +208,7 @@
         };
       });
 
-      // Leyenda en orden: TOTAL, URBANO, RURAL
+      // orden de leyenda
       const prefer = ["TOTAL","URBANO","RURAL"];
       const names = series.map(s=>s.name);
       const legendData = [];
@@ -218,10 +218,12 @@
       });
       names.forEach(n=>{ if(!legendData.includes(n)) legendData.push(n); });
 
+      // rango Y con pequeño extra abajo para labels
       const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
       const min = Math.min(...vals), max = Math.max(...vals);
       const pad = Math.max((max - min) * 0.10, 0.8);
-      const yMin = Math.floor((min - pad) * 10)/10;
+      const extraBottom = Math.max((max - min) * 0.03, 0.25);
+      const yMin = Math.floor((min - pad - extraBottom) * 10)/10;
       const yMax = Math.ceil ((max + pad) * 10)/10;
 
       chart.setOption({
@@ -231,7 +233,7 @@
         series
       });
 
-      // Etiquetas al final, tamaño constante y sin negrita
+      // === etiquetas debajo y cerca de la línea ===
       let labelsShown = false;
       chart.off('finished');
       chart.on('finished', ()=>{
@@ -240,8 +242,8 @@
           series: series.map(()=>({
             label:{
               show:true,
-              position:'top',
-              distance:10,
+              position:'bottom',
+              distance:4,
               fontSize:12,
               fontWeight:'normal',
               color:'#111827',
