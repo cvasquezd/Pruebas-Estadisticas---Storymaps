@@ -74,7 +74,7 @@
   window.addEventListener('resize', ()=>chart.resize());
   chart.setOption({
     backgroundColor: '#ffffff',
-    grid: { left: 96, right: 40, top: 68, bottom: 64, containLabel: true },
+    grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true }, /* ↓ un poco menos para acercar */
     legend: { top: 12, left: 'center', itemWidth: 18, itemHeight: 10, icon: 'roundRect', textStyle: { fontSize: 12 } },
     tooltip: {
       trigger: 'axis',
@@ -178,8 +178,6 @@
         seriesPrep.push({ name: ambito, data, mean });
       });
 
-      // ==== estilos de línea solicitados ====
-      // TOTAL -> sólida ; URBANO -> discontinua ; RURAL -> puntillada
       seriesPrep.sort((a,b)=> (b.mean||0)-(a.mean||0));
       const n = Math.max(1, seriesPrep.length);
       const minL = Math.max(18, baseHSL.l - 12);
@@ -207,7 +205,6 @@
         };
       });
 
-      // ==== ORDENAR LEYENDA: TOTAL, URBANO, RURAL ====
       const prefer = ["TOTAL","URBANO","RURAL"];
       const names = series.map(s=>s.name);
       const legendData = [];
@@ -220,17 +217,18 @@
       const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
       const min = Math.min(...vals), max = Math.max(...vals);
       const pad = Math.max((max - min) * 0.10, 0.8);
-      const yMin = Math.floor((min - pad) * 10)/10;
+      const extraBottom = Math.max((max - min) * 0.03, 0.25); // menos espacio para acercar
+      const yMin = Math.floor((min - pad - extraBottom) * 10)/10;
       const yMax = Math.ceil ((max + pad) * 10)/10;
 
       chart.setOption({
         xAxis: { data: years },
         yAxis: { min: yMin, max: yMax },
-        legend: { data: legendData },   // orden aplicado
+        legend: { data: legendData },
         series
       });
 
-      // Etiquetas al final, tamaño constante y sin negrita
+      // === Etiquetas más cerca de la línea ===
       let labelsShown = false;
       chart.off('finished');
       chart.on('finished', ()=>{
@@ -239,8 +237,8 @@
           series: series.map(()=>({
             label:{
               show:true,
-              position:'top',
-              distance:10,
+              position:'bottom',
+              distance: 4,              // ← antes: 10
               fontSize:12,
               fontWeight:'normal',
               color:'#111827',
