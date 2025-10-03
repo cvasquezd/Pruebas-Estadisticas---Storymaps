@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
@@ -178,7 +178,8 @@
         seriesPrep.push({ name: ambito, data, mean });
       });
 
-      // degradado por intensidad; rural dashed, total dotted
+      // ==== estilos de línea solicitados ====
+      // TOTAL -> sólida ; URBANO -> discontinua ; RURAL -> puntillada
       seriesPrep.sort((a,b)=> (b.mean||0)-(a.mean||0));
       const n = Math.max(1, seriesPrep.length);
       const minL = Math.max(18, baseHSL.l - 12);
@@ -187,8 +188,10 @@
 
       const series = seriesPrep.map((s,i)=>{
         const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
-        const isRural = /^rural$/i.test(s.name);
-        const isTotal = /^total$/i.test(s.name);
+        const isTotal  = /^total$/i.test(s.name);
+        const isUrbano = /^urbano$/i.test(s.name);
+        const isRural  = /^rural$/i.test(s.name);
+        const lineType = isTotal ? 'solid' : (isUrbano ? 'dashed' : (isRural ? 'dotted' : 'solid'));
         return {
           name: s.name,
           type: 'line',
@@ -196,7 +199,7 @@
           showSymbol: true,
           symbol: 'circle',
           symbolSize: 6,
-          lineStyle: { width: 2, color: col, type: isRural ? 'dashed' : (isTotal ? 'dotted' : 'solid') },
+          lineStyle: { width: 2, color: col, type: lineType },
           itemStyle: { color: col },
           emphasis: { focus: 'series', scale: false },
           clip: true,
@@ -212,7 +215,6 @@
         const hit = names.find(n => n && n.toLowerCase() === lbl.toLowerCase());
         if (hit) legendData.push(hit);
       });
-      // si hubiese otras series, agrégalas al final
       names.forEach(n=>{ if(!legendData.includes(n)) legendData.push(n); });
 
       const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
@@ -224,7 +226,7 @@
       chart.setOption({
         xAxis: { data: years },
         yAxis: { min: yMin, max: yMax },
-        legend: { data: legendData },   // << orden aplicado aquí
+        legend: { data: legendData },   // orden aplicado
         series
       });
 
@@ -270,3 +272,4 @@
 </script>
 </body>
 </html>
+
