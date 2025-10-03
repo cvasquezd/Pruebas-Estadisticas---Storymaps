@@ -134,9 +134,8 @@
       const f_dvals  = resolveFieldName(layerInfo.data, ["d_valores","d valores","descripcion_valor"]);
       if(!(f_anio && f_ambito && f_val && f_region && f_ind && f_dvals)) throw new Error("Campos requeridos no hallados.");
 
-      // === CAMBIO SOLICITADO: id_indicador = 'ind19_2' ===
+      // Filtros (id_indicador cambiado anteriormente a ind19_2)
       const WHERE = `(${f_region} = 'NACIONAL') AND (${f_ind} = 'ind19_2') AND (${f_dvals} = 'CON ACCESO')`;
-
       const res = await jsonp(tableUrl + "/query", {
         where: WHERE,
         outFields: [f_anio,f_ambito,f_val].join(","),
@@ -180,7 +179,7 @@
         seriesPrep.push({ name: ambito, data, mean });
       });
 
-      // degradado por intensidad; rural dashed, total dotted
+      // Degradado por intensidad
       seriesPrep.sort((a,b)=> (b.mean||0)-(a.mean||0));
       const n = Math.max(1, seriesPrep.length);
       const minL = Math.max(18, baseHSL.l - 12);
@@ -189,8 +188,11 @@
 
       const series = seriesPrep.map((s,i)=>{
         const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
-        const isRural = /^rural$/i.test(s.name);
-        const isTotal = /^total$/i.test(s.name);
+        const isTotal  = /^total$/i.test(s.name);
+        const isUrbano = /^urbano$/i.test(s.name);
+        const isRural  = /^rural$/i.test(s.name);
+        // === CAMBIO SOLICITADO EN TIPOS DE LÍNEA ===
+        const lineType = isTotal ? 'solid' : (isUrbano ? 'dashed' : (isRural ? 'dotted' : 'solid'));
         return {
           name: s.name,
           type: 'line',
@@ -198,7 +200,7 @@
           showSymbol: true,
           symbol: 'circle',
           symbolSize: 6,
-          lineStyle: { width: 2, color: col, type: isRural ? 'dashed' : (isTotal ? 'dotted' : 'solid') },
+          lineStyle: { width: 2, color: col, type: lineType },
           itemStyle: { color: col },
           emphasis: { focus: 'series', scale: false },
           clip: true,
@@ -206,7 +208,7 @@
         };
       });
 
-      // Orden de leyenda: TOTAL, URBANO, RURAL
+      // Leyenda en orden: TOTAL, URBANO, RURAL
       const prefer = ["TOTAL","URBANO","RURAL"];
       const names = series.map(s=>s.name);
       const legendData = [];
@@ -271,3 +273,4 @@
 </script>
 </body>
 </html>
+
