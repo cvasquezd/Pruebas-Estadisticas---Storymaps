@@ -10,33 +10,21 @@
     #wrap{position:relative;height:100vh;width:100vw}
     #chart{height:100%;width:100%}
 
+    /* ===== Leyenda ===== */
     .legend-bar{
-      position:absolute;
-      left:50%;
-      transform:translateX(-50%);
-      top:46px;
-      z-index:10;
-      display:flex;gap:10px;align-items:center;
-      pointer-events:auto;
+      position:absolute; left:50%; transform:translateX(-50%);
+      top:46px; z-index:10; display:flex; gap:10px; align-items:center; pointer-events:auto;
     }
     .legend-trigger{
       font-size:12px;font-weight:600;color:#2563eb;
-      background:rgba(255,255,255,.9);
-      border:1px solid #e5e7eb;border-radius:999px;
-      padding:4px 10px;cursor:default;
-      box-shadow:0 2px 10px rgba(0,0,0,.05);
-      user-select:none;
+      background:rgba(255,255,255,.9); border:1px solid #e5e7eb; border-radius:999px;
+      padding:4px 10px; cursor:default; box-shadow:0 2px 10px rgba(0,0,0,.05); user-select:none;
     }
     .legend-tip{
-      position:absolute;left:50%;transform:translateX(-50%);
-      top:28px;
-      background:rgba(255,255,255,.96);
-      backdrop-filter:saturate(130%) blur(2px);
-      border:1px solid #e5e7eb;border-radius:12px;
-      padding:10px 12px;min-width:220px;max-width:260px;
-      box-shadow:0 6px 18px rgba(0,0,0,.08);
-      font-size:12px;color:#374151;
-      display:none;pointer-events:none;
+      position:absolute; left:50%; transform:translateX(-50%); top:28px;
+      background:rgba(255,255,255,.96); backdrop-filter:saturate(130%) blur(2px);
+      border:1px solid #e5e7eb; border-radius:12px; padding:10px 12px; min-width:220px; max-width:260px;
+      box-shadow:0 6px 18px rgba(0,0,0,.08); font-size:12px; color:#374151; display:none; pointer-events:none;
     }
     .legend-tip h4{margin:0 0 6px 0;font-size:12px;font-weight:700;color:#111827}
     .lg-row{display:flex;align-items:center;gap:8px;margin:4px 0}
@@ -44,24 +32,22 @@
     .muted{color:#6b7280}
     .legend-trigger:hover + .legend-tip{display:block}
 
-    /* Segmentación por ámbito */
+    /* ===== Segmentación por AMBITO (derecha) ===== */
     .seg-bar{
-      position:absolute; left:12px; top:46px; z-index:10;
+      position:absolute; right:160px; top:46px; z-index:10;
       display:flex; gap:6px; align-items:center; pointer-events:auto;
     }
     .seg-btn{
       font-size:12px;font-weight:600;color:#111827;
-      background:rgba(255,255,255,.9);
-      border:1px solid #e5e7eb;border-radius:999px;
-      padding:4px 10px;cursor:pointer;
-      box-shadow:0 2px 10px rgba(0,0,0,.05);
-      user-select:none;
+      background:rgba(255,255,255,.9); border:1px solid #e5e7eb; border-radius:999px;
+      padding:4px 10px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.05);
+      user-select:none; white-space:nowrap;
     }
     .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
 
-    @media (max-width: 720px){
-      .legend-bar{top:56px}
-      .seg-bar{top:56px}
+    @media (max-width: 1024px){
+      .seg-bar{ right:120px; top:56px; }
+      .legend-bar{ top:56px; }
     }
   </style>
 </head>
@@ -69,11 +55,11 @@
 <div id="wrap">
   <div id="chart"></div>
 
-  <!-- Segmentación por ámbito -->
+  <!-- Segmentación por ámbito (texto Title Case, filtro mantiene valores en mayúsculas) -->
   <div class="seg-bar" aria-label="Segmentación por ámbito">
-    <button class="seg-btn active" data-ambito="NACIONAL">NACIONAL</button>
-    <button class="seg-btn" data-ambito="URBANO">URBANO</button>
-    <button class="seg-btn" data-ambito="RURAL">RURAL</button>
+    <button class="seg-btn active" data-ambito="TOTAL">Total</button>
+    <button class="seg-btn" data-ambito="URBANO">Urbano</button>
+    <button class="seg-btn" data-ambito="RURAL">Rural</button>
   </div>
 
   <!-- Leyenda SOLO escala de color por continuidad -->
@@ -81,32 +67,33 @@
     <div class="legend-trigger">Leyenda burbuja</div>
     <div class="legend-tip" role="tooltip" aria-label="Leyenda de colores según continuidad (horas)">
       <h4>Color por Continuidad (h)</h4>
-      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>&lt; 6 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#ef5350"></span><span>6 – &lt; 12 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>12 – &lt; 18 h</span></div>
-      <div class="lg-row"><span class="lg-chip" style="background:#2ecc71"></span><span>18 – 24 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#d00000"></span><span>&lt; 6 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#f40000"></span><span>6 – &lt; 12 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#ffb20f"></span><span>12 – &lt; 18 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#1dfc12"></span><span>18 – 24 h</span></div>
       <div class="lg-row"><span class="lg-chip" style="background:#9e9e9e"></span><span class="muted">Sin dato</span></div>
     </div>
   </div>
 </div>
 
 <script>
+/* ===================== CONFIG ===================== */
 const DOT_BORDER = { color:'#0f172a', width:0.1, type:'solid', opacity:0.90 };
 
 const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/Mapa_coropletico_2/FeatureServer";
 const LAYER_SERIE = 17; // bd_geovivienda.ogei.tb_indicadores_serie
 
 // Indicadores
-const ID_X_ALCDSE = 'ind19_2';
-const ID_Y_AGUA   = 'ind18_2';
-const ID_SZ_CL    = 'Ind_12_2';
-const ID_COL_CONT = 'Ind_13_2';
+const ID_X_ALCDSE = 'ind19_2'; // X
+const ID_Y_AGUA   = 'ind18_2'; // Y
+const ID_SZ_CL    = 'Ind_12_2';// tamaño
+const ID_COL_CONT = 'Ind_13_2';// color (horas)
 
 const YEAR_START = 2017, YEAR_END = 2024;
 
 const chart = echarts.init(document.getElementById('chart'));
 
-// Normalizadores
+/* ===================== Utils ===================== */
 const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase();
 const toNum = v => {
   if (typeof v === 'number') return v;
@@ -114,48 +101,31 @@ const toNum = v => {
   let s = String(v).trim().replace(/\s/g,'').replace('%','');
   if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g,'.');
   else if (s.includes(',') && s.includes('.')) s = s.replace(/,/g,'');
-  const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
+  const n = Number(s); return Number.isFinite(n) ? n : NaN;
 };
 
+/* Title Case con excepciones típicas en español */
+const SMALL_WORDS = new Set(['de','del','la','las','el','los','y','e','o','u','al','da','do','das','dos']);
+function toTitleCaseEs(str){
+  const clean = String(str || '').replace(/\s+/g,' ').trim().toLowerCase();
+  if(!clean) return '';
+  const parts = clean.split(' ');
+  return parts.map((w,i)=>{
+    if (i>0 && SMALL_WORDS.has(w)) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }).join(' ');
+}
+
+/* Colores solicitados para continuidad */
 function colorForContinuidad(h){
   const v = Number(h);
   if(!Number.isFinite(v)) return '#9e9e9e';
-  if(v < 6)  return '#c62828';
-  if(v < 12) return '#ef5350';
-  if(v < 18) return '#fb8c00';
-  return '#2ecc71';
+  if(v < 6)  return '#d00000';
+  if(v < 12) return '#f40000';
+  if(v < 18) return '#ffb20f';
+  return '#1dfc12';
 }
 function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
-
-async function fetchAll() {
-  // SIN TRIM: filtramos region=NACIONAL en el cliente
-  const where = [
-    "(id_indicador IN ('" + [ID_X_ALCDSE, ID_Y_AGUA, ID_SZ_CL, ID_COL_CONT].join("','") + "'))",
-    "(d_valores = 'CON ACCESO' OR id_indicador = '" + ID_COL_CONT + "')",
-    `(anio >= ${YEAR_START} AND anio <= ${YEAR_END})`
-  ].join(" AND ");
-
-  const url = qs(`${SERVICE_BASE}/${LAYER_SERIE}/query`, {
-    where,
-    outFields: "id_indicador,anio,region,ambito,d_valores,valor_porcentaje,valor_recuento",
-    returnGeometry: "false",
-    orderByFields: "anio ASC, region ASC",
-    f: "json"
-  });
-
-  const res = await fetch(url, {cache:'no-store'});
-  if(!res.ok) throw new Error(`HTTP ${res.status} al consultar la tabla de serie`);
-  const json = await res.json();
-  if(json.error) throw new Error(json.error.message || 'Error del servicio');
-
-  // Excluir NACIONAL aquí (tolerante a espacios/acentos)
-  return (json.features || [])
-    .map(f => f.attributes || {})
-    .filter(r => norm(r.region) !== 'NACIONAL');
-}
-
-// utilidades
 function extent(arr){let m=+Infinity,M=-Infinity;for(const v of arr)if(Number.isFinite(v)){if(v<m)m=v;if(v>M)M=v}if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];if(m===M)return[0,M||1];return[m,M]}
 function quantile(a,q){const s=a.slice().sort((x,y)=>x-y);if(!s.length)return NaN;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo)}
 function makeSizeFn(values, minPx=5, maxPx=75){
@@ -168,8 +138,44 @@ function makeSizeFn(values, minPx=5, maxPx=75){
   }
 }
 
+/* ============ Fetch con paginación (ArcGIS) ============ */
+async function fetchAllPaged(){
+  const where = [
+    "(id_indicador IN ('" + [ID_X_ALCDSE, ID_Y_AGUA, ID_SZ_CL, ID_COL_CONT].join("','") + "'))",
+    "(d_valores = 'CON ACCESO' OR id_indicador = '" + ID_COL_CONT + "')",
+    `(anio >= ${YEAR_START} AND anio <= ${YEAR_END})`
+  ].join(" AND ");
+
+  let offset = 0, batch = 2000, all = [];
+  while(true){
+    const url = qs(`${SERVICE_BASE}/${LAYER_SERIE}/query`, {
+      where,
+      outFields: "id_indicador,anio,region,ambito,d_valores,valor_porcentaje,valor_recuento",
+      returnGeometry: "false",
+      orderByFields: "anio ASC, region ASC",
+      resultOffset: offset,
+      resultRecordCount: batch,
+      f: "json"
+    });
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error(`HTTP ${res.status} al consultar la tabla de serie`);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || 'Error del servicio');
+
+    const feats = (json.features || []).map(f => f.attributes || {});
+    all = all.concat(feats);
+
+    if (!json.exceededTransferLimit && feats.length < batch) break;
+    offset += feats.length;
+    if (feats.length === 0) break;
+  }
+  // Excluir REGION = NACIONAL en cliente
+  return all.filter(r => norm(r.region) !== 'NACIONAL');
+}
+
+/* ============ Transformación por ÁMBITO ============ */
 function buildBy(rows, ambitoWanted){
-  const amb = norm(ambitoWanted);
+  const amb = norm(ambitoWanted); // TOTAL | URBANO | RURAL
   const data = rows.filter(r => norm(r.ambito) === amb);
 
   const byYR = new Map(); // `${anio}|${region}`
@@ -188,15 +194,17 @@ function buildBy(rows, ambitoWanted){
   for(const v of byYR.values()){
     const y = Number(v.anio); if(!Number.isFinite(y)) continue;
     if(!byYear.has(y)) byYear.set(y, []);
-    byYear.get(y).push(v); yearsSet.add(y);
+    byYear.get(y).push(v);
+    yearsSet.add(y);
   }
   return { years:[...yearsSet].sort((a,b)=>a-b), byYear };
 }
 
+/* ============ Construcción de opciones ECharts ============ */
 function buildOptionsStruct(byYear){
   const pf0 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:0 });
-  const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
   const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
+  const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
 
   const allX=[], allY=[], allS=[];
   for(const arr of byYear.values()){
@@ -224,8 +232,10 @@ function buildOptionsStruct(byYear){
   for(const y of years){
     const pts = (byYear.get(y) || []).map(p => {
       if(!Number.isFinite(p.x_pct) || !Number.isFinite(p.y_pct)) return null;
+      const regionPretty = toTitleCaseEs(p.region);
+      const ambPretty = toTitleCaseEs(p.ambito);
       return {
-        value: [p.x_pct, p.y_pct, p.sizePct, p.region, norm(p.ambito), p.contH],
+        value: [p.x_pct, p.y_pct, p.sizePct, regionPretty, ambPretty, p.contH],
         itemStyle:{
           color: colorForContinuidad(p.contH),
           opacity: DOT_BORDER.opacity,
@@ -251,7 +261,11 @@ function buildOptionsStruct(byYear){
         type:'scatter',
         data:pts,
         symbolSize:(val)=>sizeFn(val[2]),
-        label:{ show:true, formatter:(p)=>p.value[3], position:'right', fontSize:10, color:'#333' }
+        label:{
+          show:true,
+          formatter:(p)=>p.value[3],   // ya viene en Title Case
+          position:'right', fontSize:10, color:'#333'
+        }
       }]
     });
   }
@@ -273,14 +287,12 @@ function buildOptionsStruct(byYear){
       tooltip:{
         padding:6, borderWidth:1,
         formatter:(o)=>{
-          const [xAlcDse,yAcceso,pctCl,region,ambito,contH]=o.value;
-          const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
-          const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
+          const [xAlcDse,yAcceso,pctCl,regionPretty,ambPretty,contH]=o.value;
           const yTxt  = Number.isFinite(yAcceso)? pf2.format(yAcceso)+'%':'—';
           const xTxt  = Number.isFinite(xAlcDse)? pf2.format(xAlcDse)+'%':'—';
           const cTxt  = Number.isFinite(contH)?  pf1.format(contH)+' h':'—';
           const sTxt  = Number.isFinite(pctCl)?  pf2.format(pctCl)+'%':'—';
-          return `<b>${region}</b> (${ambito})<br>
+          return `<b>${regionPretty}</b> (${ambPretty})<br>
                   Acceso a agua (Y): <b>${yTxt}</b><br>
                   % Pob. con Alc/DSE (X): <b>${xTxt}</b><br>
                   Continuidad (color): <b>${cTxt}</b><br>
@@ -291,10 +303,10 @@ function buildOptionsStruct(byYear){
       xAxis:{ type:'value', name:'% Pob. con Alc/DSE',
         min:xInitMin, max:xInitMax, nameGap:25, nameLocation:'middle',
         nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
-        axisLabel:{ formatter:(v)=>`${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
+        axisLabel:{ formatter:(v)=>`${pf0.format(v)}%` } },
       yAxis:{ type:'value', name:'Acceso a agua (%)',
         min:yInitMin, max:yInitMax, nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
-        axisLabel:{ formatter:(v)=>`${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
+        axisLabel:{ formatter:(v)=>`${pf0.format(v)}%` } },
       dataZoom:[
         { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
         { type:'inside', xAxisIndex:0, filterMode:'none' },
@@ -309,12 +321,13 @@ function buildOptionsStruct(byYear){
   };
 }
 
+/* ===================== Run ===================== */
 (async function run(){
   try{
     chart.showLoading({ text: 'Cargando datos…' });
-    const allRows = await fetchAll();
+    const allRows = await fetchAllPaged();
 
-    let currentAmbito = 'NACIONAL';
+    let currentAmbito = 'TOTAL';
 
     async function render(){
       const { years, byYear } = buildBy(allRows, currentAmbito);
@@ -328,7 +341,7 @@ function buildOptionsStruct(byYear){
       btn.addEventListener('click', async ()=>{
         document.querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
-        currentAmbito = btn.getAttribute('data-ambito') || 'NACIONAL';
+        currentAmbito = btn.getAttribute('data-ambito') || 'TOTAL';
         chart.showLoading({ text: 'Actualizando…' });
         await render();
       });
@@ -349,3 +362,4 @@ function buildOptionsStruct(byYear){
 </script>
 </body>
 </html>
+
