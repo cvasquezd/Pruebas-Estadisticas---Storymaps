@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Evolución de Principales Indicadores de Saneamiento</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
+    #wrap{position:relative;height:100vh;width:100vw}
+    #chart{height:100%;width:100%}
+
+    .legend-bar{
+      position:absolute;
+      left:50%;
+      transform:translateX(-50%);
+      top:46px;
+      z-index:10;
+      display:flex;gap:10px;align-items:center;
+      pointer-events:auto;
+    }
+    .legend-trigger{
+      font-size:12px;font-weight:600;color:#2563eb;
+      background:rgba(255,255,255,.9);
+      border:1px solid #e5e7eb;border-radius:999px;
+      padding:4px 10px;cursor:default;
+      box-shadow:0 2px 10px rgba(0,0,0,.05);
+      user-select:none;
+    }
+    .legend-tip{
+      position:absolute;left:50%;transform:translateX(-50%);
+      top:28px;
+      background:rgba(255,255,255,.96);
+      backdrop-filter:saturate(130%) blur(2px);
+      border:1px solid #e5e7eb;border-radius:12px;
+      padding:10px 12px;min-width:220px;max-width:260px;
+      box-shadow:0 6px 18px rgba(0,0,0,.08);
+      font-size:12px;color:#374151;
+      display:none;pointer-events:none;
+    }
+    .legend-tip h4{margin:0 0 6px 0;font-size:12px;font-weight:700;color:#111827}
+    .lg-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+    .lg-chip{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.08);flex:0 0 auto}
+    .muted{color:#6b7280}
+    .legend-trigger:hover + .legend-tip{display:block}
+
+    /* Segmentación por ámbito */
+    .seg-bar{
+      position:absolute; left:12px; top:46px; z-index:10;
+      display:flex; gap:6px; align-items:center; pointer-events:auto;
+    }
+    .seg-btn{
+      font-size:12px;font-weight:600;color:#111827;
+      background:rgba(255,255,255,.9);
+      border:1px solid #e5e7eb;border-radius:999px;
+      padding:4px 10px;cursor:pointer;
+      box-shadow:0 2px 10px rgba(0,0,0,.05);
+      user-select:none;
+    }
+    .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
+
+    @media (max-width: 720px){
+      .legend-bar{top:56px}
+      .seg-bar{top:56px}
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="chart"></div>
+
+  <!-- Segmentación por ámbito -->
+  <div class="seg-bar" aria-label="Segmentación por ámbito">
+    <button class="seg-btn active" data-ambito="NACIONAL">NACIONAL</button>
+    <button class="seg-btn" data-ambito="URBANO">URBANO</button>
+    <button class="seg-btn" data-ambito="RURAL">RURAL</button>
+  </div>
+
+  <!-- Leyenda SOLO escala de color por continuidad -->
+  <div class="legend-bar" aria-hidden="true">
+    <div class="legend-trigger">Leyenda burbuja</div>
+    <div class="legend-tip" role="tooltip" aria-label="Leyenda de colores según continuidad (horas)">
+      <h4>Color por Continuidad (h)</h4>
+      <div class="lg-row"><span class="lg-chip" style="background:#c62828"></span><span>&lt; 6 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#ef5350"></span><span>6 – &lt; 12 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#fb8c00"></span><span>12 – &lt; 18 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#2ecc71"></span><span>18 – 24 h</span></div>
+      <div class="lg-row"><span class="lg-chip" style="background:#9e9e9e"></span><span class="muted">Sin dato</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DOT_BORDER = { color:'#0f172a', width:0.1, type:'solid', opacity:0.90 };
+
+const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/Hosted/Mapa_coropletico_2/FeatureServer";
+const LAYER_SERIE = 17; // bd_geovivienda.ogei.tb_indicadores_serie
+
+// Indicadores
+const ID_X_ALCDSE = 'ind19_2';
+const ID_Y_AGUA   = 'ind18_2';
+const ID_SZ_CL    = 'Ind_12_2';
+const ID_COL_CONT = 'Ind_13_2';
+
+const YEAR_START = 2017, YEAR_END = 2024;
+
+const chart = echarts.init(document.getElementById('chart'));
+
+// Normalizadores
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase();
+const toNum = v => {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  let s = String(v).trim().replace(/\s/g,'').replace('%','');
+  if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g,'.');
+  else if (s.includes(',') && s.includes('.')) s = s.replace(/,/g,'');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+function colorForContinuidad(h){
+  const v = Number(h);
+  if(!Number.isFinite(v)) return '#9e9e9e';
+  if(v < 6)  return '#c62828';
+  if(v < 12) return '#ef5350';
+  if(v < 18) return '#fb8c00';
+  return '#2ecc71';
+}
+function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+async function fetchAll() {
+  // SIN TRIM: filtramos region=NACIONAL en el cliente
+  const where = [
+    "(id_indicador IN ('" + [ID_X_ALCDSE, ID_Y_AGUA, ID_SZ_CL, ID_COL_CONT].join("','") + "'))",
+    "(d_valores = 'CON ACCESO' OR id_indicador = '" + ID_COL_CONT + "')",
+    `(anio >= ${YEAR_START} AND anio <= ${YEAR_END})`
+  ].join(" AND ");
+
+  const url = qs(`${SERVICE_BASE}/${LAYER_SERIE}/query`, {
+    where,
+    outFields: "id_indicador,anio,region,ambito,d_valores,valor_porcentaje,valor_recuento",
+    returnGeometry: "false",
+    orderByFields: "anio ASC, region ASC",
+    f: "json"
+  });
+
+  const res = await fetch(url, {cache:'no-store'});
+  if(!res.ok) throw new Error(`HTTP ${res.status} al consultar la tabla de serie`);
+  const json = await res.json();
+  if(json.error) throw new Error(json.error.message || 'Error del servicio');
+
+  // Excluir NACIONAL aquí (tolerante a espacios/acentos)
+  return (json.features || [])
+    .map(f => f.attributes || {})
+    .filter(r => norm(r.region) !== 'NACIONAL');
+}
+
+// utilidades
+function extent(arr){let m=+Infinity,M=-Infinity;for(const v of arr)if(Number.isFinite(v)){if(v<m)m=v;if(v>M)M=v}if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];if(m===M)return[0,M||1];return[m,M]}
+function quantile(a,q){const s=a.slice().sort((x,y)=>x-y);if(!s.length)return NaN;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo)}
+function makeSizeFn(values, minPx=5, maxPx=75){
+  const [mn,mx]=extent(values);
+  return x=>{
+    const v=Math.max(0,Number(x)||0);
+    let t=(mx>mn)?(v-mn)/(mx-mn):0.5;
+    t=Math.max(0,Math.min(1,t));
+    return minPx + Math.sqrt(t)*(maxPx-minPx);
+  }
+}
+
+function buildBy(rows, ambitoWanted){
+  const amb = norm(ambitoWanted);
+  const data = rows.filter(r => norm(r.ambito) === amb);
+
+  const byYR = new Map(); // `${anio}|${region}`
+  for(const r of data){
+    const key = `${r.anio}|${r.region}`;
+    if(!byYR.has(key)) byYR.set(key, { anio:r.anio, region:r.region, ambito:r.ambito });
+    const obj = byYR.get(key);
+    const id = String(r.id_indicador);
+    if(id === ID_X_ALCDSE) obj.x_pct   = toNum(r.valor_porcentaje);
+    if(id === ID_Y_AGUA)   obj.y_pct   = toNum(r.valor_porcentaje);
+    if(id === ID_SZ_CL)    obj.sizePct = toNum(r.valor_porcentaje);
+    if(id === ID_COL_CONT) obj.contH   = toNum(r.valor_recuento);
+  }
+
+  const yearsSet = new Set(), byYear = new Map();
+  for(const v of byYR.values()){
+    const y = Number(v.anio); if(!Number.isFinite(y)) continue;
+    if(!byYear.has(y)) byYear.set(y, []);
+    byYear.get(y).push(v); yearsSet.add(y);
+  }
+  return { years:[...yearsSet].sort((a,b)=>a-b), byYear };
+}
+
+function buildOptionsStruct(byYear){
+  const pf0 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:0 });
+  const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
+  const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
+
+  const allX=[], allY=[], allS=[];
+  for(const arr of byYear.values()){
+    for(const p of arr){
+      if(Number.isFinite(p.x_pct)) allX.push(p.x_pct);
+      if(Number.isFinite(p.y_pct)) allY.push(p.y_pct);
+      if(Number.isFinite(p.sizePct)) allS.push(p.sizePct);
+    }
+  }
+  if(!allX.length || !allY.length) throw new Error('No hay datos válidos para X o Y en el ámbito seleccionado.');
+
+  const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
+  const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
+  const xPad=(xQ95-xQ05)*0.05, yPad=(yQ95-yQ05)*0.05;
+  const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
+  const clamp01 = v => Math.max(0, Math.min(100, v));
+  const xInitMin = clamp01(Math.min(xQ05 - xPad, xMinAll));
+  const xInitMax = clamp01(Math.max(xQ95 + xPad, xMaxAll));
+  const yInitMin = clamp01(Math.min(yQ05 - yPad, yMinAll));
+  const yInitMax = clamp01(Math.max(yQ95 + yPad, yMaxAll));
+
+  const sizeFn = makeSizeFn(allS, 5, 75);
+
+  const options=[], years=[...byYear.keys()].sort((a,b)=>a-b);
+  for(const y of years){
+    const pts = (byYear.get(y) || []).map(p => {
+      if(!Number.isFinite(p.x_pct) || !Number.isFinite(p.y_pct)) return null;
+      return {
+        value: [p.x_pct, p.y_pct, p.sizePct, p.region, norm(p.ambito), p.contH],
+        itemStyle:{
+          color: colorForContinuidad(p.contH),
+          opacity: DOT_BORDER.opacity,
+          borderColor: DOT_BORDER.color,
+          borderWidth: DOT_BORDER.width,
+          borderType: DOT_BORDER.type
+        },
+        emphasis:{
+          itemStyle:{
+            borderColor: DOT_BORDER.color,
+            borderWidth: Math.max(DOT_BORDER.width + 0.5, DOT_BORDER.width),
+            borderType: DOT_BORDER.type
+          },
+          scale:1.08, focus:'self'
+        }
+      };
+    }).filter(Boolean);
+
+    options.push({
+      title:{ show:true, text:String(y) },
+      series:[{
+        name:String(y),
+        type:'scatter',
+        data:pts,
+        symbolSize:(val)=>sizeFn(val[2]),
+        label:{ show:true, formatter:(p)=>p.value[3], position:'right', fontSize:10, color:'#333' }
+      }]
+    });
+  }
+
+  return {
+    baseOption:{
+      timeline:{
+        axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
+        playInterval:2000, right:0, top:20, bottom:20, width:55, symbol:'none',
+        checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
+        data: years
+      },
+      title:[
+        { text: years[0], right:155, bottom:52, textAlign:'right',
+          textStyle:{ fontSize:32, fontWeight:700, color:'#e5e7eb' } },
+        { text:'Evolución de Principales Indicadores de Saneamiento',
+          left:'center', top:8, textStyle:{ fontWeight:'700', fontSize:16 } }
+      ],
+      tooltip:{
+        padding:6, borderWidth:1,
+        formatter:(o)=>{
+          const [xAlcDse,yAcceso,pctCl,region,ambito,contH]=o.value;
+          const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
+          const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
+          const yTxt  = Number.isFinite(yAcceso)? pf2.format(yAcceso)+'%':'—';
+          const xTxt  = Number.isFinite(xAlcDse)? pf2.format(xAlcDse)+'%':'—';
+          const cTxt  = Number.isFinite(contH)?  pf1.format(contH)+' h':'—';
+          const sTxt  = Number.isFinite(pctCl)?  pf2.format(pctCl)+'%':'—';
+          return `<b>${region}</b> (${ambito})<br>
+                  Acceso a agua (Y): <b>${yTxt}</b><br>
+                  % Pob. con Alc/DSE (X): <b>${xTxt}</b><br>
+                  Continuidad (color): <b>${cTxt}</b><br>
+                  % Pob. con Cl aceptable (tamaño): <b>${sTxt}</b>`;
+        }
+      },
+      grid:{ top:86, left:40, right:140, bottom:90, containLabel:true },
+      xAxis:{ type:'value', name:'% Pob. con Alc/DSE',
+        min:xInitMin, max:xInitMax, nameGap:25, nameLocation:'middle',
+        nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
+        axisLabel:{ formatter:(v)=>`${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
+      yAxis:{ type:'value', name:'Acceso a agua (%)',
+        min:yInitMin, max:yInitMax, nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
+        axisLabel:{ formatter:(v)=>`${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
+      dataZoom:[
+        { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
+        { type:'inside', xAxisIndex:0, filterMode:'none' },
+        { type:'slider', yAxisIndex:0, filterMode:'none', right:6, width:12 },
+        { type:'inside', yAxisIndex:0, filterMode:'none' }
+      ],
+      series:[{ type:'scatter', data:[] }],
+      animationDurationUpdate:1000,
+      animationEasingUpdate:'quinticInOut'
+    },
+    options
+  };
+}
+
+(async function run(){
+  try{
+    chart.showLoading({ text: 'Cargando datos…' });
+    const allRows = await fetchAll();
+
+    let currentAmbito = 'NACIONAL';
+
+    async function render(){
+      const { years, byYear } = buildBy(allRows, currentAmbito);
+      if (!years.length) throw new Error('No hay datos para el ámbito seleccionado.');
+      const option = buildOptionsStruct(byYear);
+      chart.hideLoading();
+      chart.setOption(option, true);
+    }
+
+    document.querySelectorAll('.seg-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        document.querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        currentAmbito = btn.getAttribute('data-ambito') || 'NACIONAL';
+        chart.showLoading({ text: 'Actualizando…' });
+        await render();
+      });
+    });
+
+    await render();
+    window.addEventListener('resize', ()=>chart.resize());
+  }catch(err){
+    console.error(err);
+    chart.hideLoading();
+    chart.setOption({
+      title:{ text:'Error al cargar datos', left:'center' },
+      graphic:{ type:'text', left:'center', top:'middle',
+        style:{ text: (err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
+    });
+  }
+})();
+</script>
+</body>
+</html>
