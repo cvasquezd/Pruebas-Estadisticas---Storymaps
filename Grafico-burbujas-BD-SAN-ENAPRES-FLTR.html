@@ -46,8 +46,8 @@
     }
     .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
 
-    /* ===== Desplegable regiones ===== */
-    .dd{ position:relative; }
+    /* ===== Desplegable departamentos ===== */
+    .dd{ position:relative; margin-right:14px; } /* más distancia antes de "Total" */
     .dd-panel{
       position:absolute; top:110%; left:0;
       background:#fff; border:1px solid #e5e7eb; border-radius:12px;
@@ -74,11 +74,11 @@
 
   <!-- Segmentación + filtro -->
   <div class="seg-bar" aria-label="Controles">
-    <!-- Filtro regiones (a la izquierda del botón Total) -->
+    <!-- Filtro departamentos (a la izquierda del botón Total) -->
     <div class="dd" id="regionDD">
-      <button class="dd-trigger" id="regionTrigger">Filtrar regiones</button>
+      <button class="dd-trigger" id="regionTrigger">Filtrar Departamentos</button>
       <div class="dd-panel" id="regionPanel" role="listbox" aria-multiselectable="true">
-        <input class="dd-search" id="regionSearch" placeholder="Buscar región…"/>
+        <input class="dd-search" id="regionSearch" placeholder="Buscar departamento…"/>
         <div class="dd-actions">
           <button class="pill" id="selAll">Seleccionar todo</button>
           <button class="pill" id="selNone">Limpiar</button>
@@ -156,7 +156,7 @@ function colorForContinuidad(h){
 function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
 function extent(arr){let m=+Infinity,M=-Infinity;for(const v of arr)if(Number.isFinite(v)){if(v<m)m=v;if(v>M)M=v}if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];if(m===M)return[0,M||1];return[m,M]}
 function quantile(a,q){const s=a.slice().sort((x,y)=>x-y);if(!s.length)return NaN;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo)}
-function makeSizeFn(values, minPx=18, maxPx=85){  /* actualizado: 18–85 */
+function makeSizeFn(values, minPx=18, maxPx=85){
   const [mn,mx]=extent(values);
   return x=>{
     const v=Math.max(0,Number(x)||0);
@@ -204,8 +204,8 @@ async function fetchAllPaged(){
 /* ===================== Estado del filtro ===================== */
 let currentAmbito = 'TOTAL';
 let allRows = [];
-let allRegions = [];           // normalizadas -> originales (map)
-let selectedRegions = new Set(); // normalizadas
+let allRegions = [];
+let selectedRegions = new Set();
 
 function buildRegionIndex(rows){
   const set = new Set();
@@ -214,8 +214,7 @@ function buildRegionIndex(rows){
     if(regN && regN !== 'NACIONAL') set.add(regN);
   }
   allRegions = [...set].sort().map(n=>({ norm:n, pretty:toTitleCaseEs(n) }));
-  // Selección por defecto: todas
-  selectedRegions = new Set(allRegions.map(r=>r.norm));
+  selectedRegions = new Set(allRegions.map(r=>r.norm)); // todas por defecto
   renderRegionDropdown();
 }
 
@@ -237,15 +236,14 @@ function renderRegionDropdown(){
 /* ============ Transformación por ÁMBITO + Filtros ============ */
 function buildBy(rows, ambitoWanted){
   const amb = norm(ambitoWanted); // TOTAL | URBANO | RURAL
-  // Filtro base por ámbito
   let data = rows.filter(r => norm(r.ambito) === amb);
 
-  // Regla: en RURAL se excluye CALLAO
+  // En RURAL se excluye CALLAO
   if(amb === 'RURAL'){
     data = data.filter(r => norm(r.region) !== 'CALLAO');
   }
 
-  // Filtro por regiones seleccionadas
+  // Filtro por departamentos seleccionados
   data = data.filter(r => selectedRegions.has(norm(r.region)));
 
   const byYR = new Map(); // `${anio}|${region}`
@@ -300,7 +298,7 @@ function buildOptionsStruct(byYear){
   const yearX = xInitMin + 0.85 * (xInitMax - xInitMin);
   const yearY = yInitMin;
 
-  const sizeFn = makeSizeFn(allS, 18, 85); // actualizado
+  const sizeFn = makeSizeFn(allS, 18, 85);
 
   const options=[], years=[...byYear.keys()].sort((a,b)=>a-b);
   for(const y of years){
@@ -338,7 +336,7 @@ function buildOptionsStruct(byYear){
           label:{
             show:true,
             formatter:(p)=>p.value[3],
-            position:'right', fontSize:13, color:'#333'  // actualizado: 13
+            position:'right', fontSize:13, color:'#333'
           }
         },
         {
@@ -391,7 +389,7 @@ function buildOptionsStruct(byYear){
         }
       },
       grid:{ top:86, left:40, right:140, bottom:90, containLabel:true },
-      xAxis:{ type:'value', name:'Acceso a Alcantarillado/DSE (%)',   /* actualizado */
+      xAxis:{ type:'value', name:'Acceso a Alcantarillado/DSE (%)',
         min:xInitMin, max:xInitMax, nameGap:25, nameLocation:'middle',
         nameTextStyle:{ fontSize:14 }, splitLine:{ show:true }, scale:true,
         axisLabel:{ formatter:(v)=>`${new Intl.NumberFormat('es-PE',{ maximumFractionDigits:0 }).format(v)}%` } },
@@ -438,7 +436,7 @@ function buildOptionsStruct(byYear){
       });
     });
 
-    // Desplegable regiones
+    // Desplegable departamentos
     const dd = document.getElementById('regionDD');
     const trigger = document.getElementById('regionTrigger');
     const panel = document.getElementById('regionPanel');
@@ -490,9 +488,7 @@ function buildOptionsStruct(byYear){
     });
 
     // Primer render
-    await (async function(){
-      await render();
-    })();
+    await render();
 
     window.addEventListener('resize', ()=>chart.resize());
   }catch(err){
