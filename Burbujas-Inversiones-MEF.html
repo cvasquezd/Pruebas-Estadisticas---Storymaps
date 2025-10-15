@@ -3,268 +3,495 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Evolución del avance por región y nivel de gobierno</title>
+  <title>Evolución del Avance por Ejecutora y Nivel de Gobierno</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
     html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
-    #wrap{position:relative;height:100vh;width:100vw;display:flex;flex-direction:column}
-    .topbar{position:relative;z-index:10;padding:10px 12px 4px;display:flex;flex-direction:column;align-items:center;gap:10px}
-    .title{font-weight:700;font-size:16px;line-height:1.1;margin:0}
-    .tabs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-    .tab{font-size:12px;font-weight:600;border:1px solid #e5e7eb;background:#fff;color:#111827;
-         padding:6px 12px;border-radius:999px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.06);user-select:none}
-    .tab.active{color:#fff;border-color:transparent}
-    .tab[data-level="GOBIERNO NACIONAL"].active{background:#014F99}
-    .tab[data-level="GOBIERNO REGIONAL"].active{background:#E30713}
-    .tab[data-level="GOBIERNO LOCAL"].active{background:#22c55e}
-    .tab[data-level="SIN ESPECIFICAR"].active{background:#9e9e9e}
+    #wrap{position:relative;height:100vh;width:100vw}
     #chart{height:100%;width:100%}
+
+    /* ===== Leyenda mínima ===== */
+    .legend-bar{
+      position:absolute; left:50%; transform:translateX(-50%);
+      top:50px; z-index:10; display:flex; gap:10px; align-items:center; pointer-events:auto;
+    }
+    .legend-trigger{
+      font-size:12px;font-weight:600;color:#2563eb;
+      background:rgba(255,255,255,.9); border:1px solid #e5e7eb; border-radius:999px;
+      padding:4px 10px; cursor:default; box-shadow:0 2px 10px rgba(0,0,0,.05); user-select:none;
+    }
+    .legend-tip{
+      position:absolute; left:50%; transform:translateX(-50%); top:28px;
+      background:rgba(255,255,255,.96); backdrop-filter:saturate(130%) blur(2px);
+      border:1px solid #e5e7eb; border-radius:12px; padding:10px 12px; min-width:220px; max-width:260px;
+      box-shadow:0 6px 18px rgba(0,0,0,.08); font-size:12px; color:#374151; display:none; pointer-events:none;
+    }
+    .legend-tip h4{margin:0 0 6px 0;font-size:12px;font-weight:700;color:#111827}
+    .legend-trigger:hover + .legend-tip{display:block}
+
+    /* ===== Segmentación + filtro (derecha) ===== */
+    .seg-bar{
+      position:absolute; right:160px; top:50px; z-index:12;
+      display:flex; gap:8px; align-items:center; pointer-events:auto; flex-wrap:wrap;
+      max-width:min(60vw, 740px); justify-content:flex-end;
+    }
+    .seg-btn, .dd-trigger{
+      font-size:12px;font-weight:600;color:#111827;
+      background:rgba(255,255,255,.92); border:1px solid #e5e7eb; border-radius:999px;
+      padding:6px 12px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.05);
+      user-select:none; white-space:nowrap;
+    }
+    .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
+
+    /* ===== Desplegable Departamentos ===== */
+    .dd{ position:relative; margin-right:16px; } /* distancia respecto a los botones */
+    .dd-panel{
+      position:absolute; top:110%; left:0;
+      background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+      box-shadow:0 8px 24px rgba(0,0,0,.10);
+      padding:10px; min-width:260px; max-height:260px; overflow:auto; display:none; z-index:20;
+    }
+    .dd.open .dd-panel{ display:block; }
+    .dd-search{ width:100%; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:8px; font-size:12px; }
+    .dd-list{ display:flex; flex-direction:column; gap:6px; }
+    .dd-row{ display:flex; align-items:center; gap:8px; font-size:12px; }
+    .dd-actions{ display:flex; justify-content:space-between; gap:8px; margin-top:8px; }
+    .pill{ font-size:12px; padding:4px 8px; border:1px solid #e5e7eb; border-radius:999px; background:#fff; cursor:pointer; }
+    .pill:hover{ border-color:#bfdbfe; }
+
+    @media (max-width: 1024px){
+      .seg-bar{ right:120px; top:58px; }
+      .legend-bar{ top:58px; }
+    }
   </style>
 </head>
 <body>
 <div id="wrap">
-  <div class="topbar">
-    <h1 class="title">Evolución del avance por región y nivel de gobierno</h1>
-    <div class="tabs" id="tabs"></div>
-  </div>
   <div id="chart"></div>
+
+  <!-- Segmentación + filtro -->
+  <div class="seg-bar" aria-label="Controles">
+    <!-- Filtro por Departamento de la ejecutora -->
+    <div class="dd" id="depDD">
+      <button class="dd-trigger" id="depTrigger">Filtrar Departamentos</button>
+      <div class="dd-panel" id="depPanel" role="listbox" aria-multiselectable="true">
+        <input class="dd-search" id="depSearch" placeholder="Buscar departamento…"/>
+        <div class="dd-actions">
+          <button class="pill" id="selAll">Seleccionar todo</button>
+          <button class="pill" id="selNone">Limpiar</button>
+        </div>
+        <div class="dd-list" id="depList"></div>
+      </div>
+    </div>
+
+    <!-- Aquí se generarán los botones de nivel -->
+    <div id="nivelesBtns"></div>
+  </div>
+
+  <!-- Leyenda breve -->
+  <div class="legend-bar" aria-hidden="true">
+    <div class="legend-trigger">Guía</div>
+    <div class="legend-tip" role="tooltip">
+      <h4>Cómo leer</h4>
+      <div style="font-size:12px;line-height:1.35">
+        • Eje X: <b>PIM (S/)</b>.<br>
+        • Eje Y: <b>% Avance</b> = Devengado / PIM × 100.<br>
+        • Color: <b>Departamento de la Ejecutora</b>.<br>
+        • Tamaño: proporcional al <b>PIM</b>.
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
-/* ===== Config ===== */
+/* ===================== CONFIG ===================== */
 const SERVICE_BASE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
-const LAYER_ID     = 14;   // tb_mef_presupuesto_ejecucion_gasto_funcion_da
-const YEAR_START   = 1999;
-const YEAR_END     = 2025;
+const LAYER_ID = 15; // mv_mef_presupuesto_ejecucion_gasto_funcion_da_xproyecto
+const YEAR_START = 1999, YEAR_END = 2025;
 
-const COLORS_BY_NIVEL = {
-  "GOBIERNO NACIONAL": "#014F99",
-  "GOBIERNO REGIONAL": "#E30713",
-  "GOBIERNO LOCAL":    "#22c55e",
-  "SIN ESPECIFICAR":   "#9e9e9e"
-};
 const DOT_BORDER = { color:'#0f172a', width:0.8, type:'solid', opacity:0.95 };
 
-/* ===== Utils ===== */
+const chart = echarts.init(document.getElementById('chart'));
+
+/* ===================== Utils ===================== */
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase();
+const moneyFmt = (()=>{ const nf=new Intl.NumberFormat('es-PE',{style:'currency',currency:'PEN',maximumFractionDigits:0}); return v=>nf.format(v).replace('S/.','S/').replace('PEN','S/'); })();
+const p0 = new Intl.NumberFormat('es-PE',{maximumFractionDigits:0});
+const p2 = new Intl.NumberFormat('es-PE',{maximumFractionDigits:2});
+
+function toTitleCaseEs(str){
+  const SMALL = new Set(['de','del','la','las','el','los','y','e','o','u','al','da','do','das','dos']);
+  const clean = String(str||'').toLowerCase().replace(/\s+/g,' ').trim();
+  if(!clean) return '';
+  return clean.split(' ').map((w,i)=> (i>0 && SMALL.has(w)) ? w : (w.charAt(0).toUpperCase()+w.slice(1))).join(' ');
+}
+function extent(a){let m=+Infinity,M=-Infinity;for(const v of a)if(Number.isFinite(v)){if(v<m)m=v;if(v>M)M=v}if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];if(m===M)return[m,m||1];return[m,M]}
+function quantile(a,q){const s=a.slice().filter(Number.isFinite).sort((x,y)=>x-y);if(!s.length)return NaN;const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?s[lo]:s[lo]+(s[hi]-s[lo])*(p-lo)}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function makeSizeFn(values, minPx=14, maxPx=90){
+  const [mn,mx]=extent(values);
+  return x=>{ const v=Math.max(0,Number(x)||0); let t=(mx>mn)?(v-mn)/(mx-mn):0.5; t=clamp(t,0,1); return minPx+Math.sqrt(t)*(maxPx-minPx); };
+}
 function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
-function parseNum(v){ const n = Number(v); return Number.isFinite(n) ? n : NaN; }
-function extent(a){ let m=+Infinity,M=-Infinity; for(const v of a){ if(Number.isFinite(v)){ if(v<m)m=v; if(v>M)M=v; } }
-  if(!Number.isFinite(m)||!Number.isFinite(M)) return [0,1]; if(m===M) return [0, M||1]; return [m,M]; }
-function quantile(a,q){ const s=a.slice().filter(Number.isFinite).sort((x,y)=>x-y); if(!s.length) return NaN;
-  const p=(s.length-1)*q, lo=Math.floor(p), hi=Math.ceil(p); return lo===hi?s[lo]:s[lo]+(s[hi]-s[lo])*(p-lo); }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function makeSizeFn(vals, minPx=8, maxPx=74){ const [mn,mx]=extent(vals);
-  return x=>{ const v=Math.max(0,Number(x)||0); let t=(mx>mn)?(v-mn)/(mx-mn):0.5; t=clamp(t,0,1); return minPx+Math.sqrt(t)*(maxPx-minPx); }; }
-const moneyFmt = (()=>{
-  const nf=new Intl.NumberFormat('es-PE',{style:'currency',currency:'PEN',maximumFractionDigits:0});
-  return v=>nf.format(v).replace('S/.','S/').replace('PEN','S/');
-})();
-function normalizeNivel(s){
-  const raw = (s||'').toString().trim().toUpperCase().replace(/\s+/g,' ').replace(/\./g,'');
-  if(/NAC(IONAL)?/.test(raw)) return "GOBIERNO NACIONAL";
-  if(/REG(IONAL)?/.test(raw)) return "GOBIERNO REGIONAL";
-  if(/LOC(AL)?/.test(raw)) return "GOBIERNO LOCAL";
-  if(/SIN\s*ESPEC/.test(raw)) return "SIN ESPECIFICAR";
-  if(raw.includes("NACIONAL")) return "GOBIERNO NACIONAL";
-  if(raw.includes("REGIONAL")) return "GOBIERNO REGIONAL";
-  if(raw.includes("LOCAL"))    return "GOBIERNO LOCAL";
-  return "SIN ESPECIFICAR";
-}
-function colorForNivel(n){ return COLORS_BY_NIVEL[normalizeNivel(n)] || COLORS_BY_NIVEL["SIN ESPECIFICAR"]; }
 
-/* ===== Consulta agregada en el servidor ===== */
-async function fetchAggregated(){
-  const outStats = JSON.stringify([
-    { "statisticType":"sum", "onStatisticField":"monto_pim",       "outStatisticFieldName":"pim_sum" },
-    { "statisticType":"sum", "onStatisticField":"monto_devengado", "outStatisticFieldName":"dev_sum" }
-  ]);
-  const url = qs(`${SERVICE_BASE}/${LAYER_ID}/query`, {
-    where: `ano_eje >= ${YEAR_START} AND ano_eje <= ${YEAR_END}`,
-    groupByFieldsForStatistics: "ano_eje,departamento_meta_nombre,nivel_gobierno_nombre",
-    outFields: "ano_eje,departamento_meta_nombre,nivel_gobierno_nombre",
-    outStatistics: outStats,
-    orderByFields: "ano_eje,departamento_meta_nombre",
-    returnGeometry: "false",
-    f: "json"
-  });
-  const res = await fetch(url, { cache: "no-store" });
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  if(json.error) throw new Error(json.error.message || "Error del servicio");
-
-  const byYear = new Map();
-  const presentLevels = new Set();
-
-  for(const ft of (json.features||[])){
-    const a = ft.attributes || {};
-    const year  = parseNum(a.ano_eje);
-    const dep   = (a.departamento_meta_nombre || "").toString().trim();
-    const nivel = normalizeNivel(a.nivel_gobierno_nombre);
-    const pim   = parseNum(a.pim_sum);
-    const dev   = parseNum(a.dev_sum);
-    if(!Number.isFinite(year) || !dep) continue;
-
-    presentLevels.add(nivel);
-    const avance = (Number.isFinite(pim) && pim>0 && Number.isFinite(dev)) ? (dev/pim)*100 : NaN;
-    const point = { year, dep, nivel, pim, dev, avance };
-
-    if(!byYear.has(year)) byYear.set(year, []);
-    byYear.get(year).push(point);
-  }
-
-  const years = Array.from(byYear.keys()).sort((a,b)=>a-b);
-  return { byYear, years, presentLevels: Array.from(presentLevels) };
-}
-
-/* ===== Render ===== */
-(function(){
-  const chart = echarts.init(document.getElementById('chart'));
-  const p0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits:0 });
-  const p2 = new Intl.NumberFormat('es-PE', { maximumFractionDigits:2 });
-
-  function buildOption(byYear, years, nivelFiltrado){
-    // Filtrar años que SÍ tienen al menos un punto del nivel seleccionado
-    const yearsFiltered = years.filter(y => (byYear.get(y)||[]).some(p => p.nivel === nivelFiltrado));
-    if(!yearsFiltered.length){
-      return {
-        baseOption:{ series:[{type:'scatter', data:[]}] },
-        options:[],
-        graphic:{ type:'text', left:'center', top:'middle',
-          style:{ text:'Sin datos para el nivel seleccionado.', fontSize:14, fill:'#6b7280' } }
-      };
+/* ===== Paleta viva por Departamento (estable) ===== */
+const VIVID = [
+  "#e41a1c","#377eb8","#4daf4a","#984ea3","#ff7f00","#ffff33","#a65628","#f781bf","#999999",
+  "#1f77b4","#ff6e54","#88cc00","#d62728","#17becf","#bcbd22","#9467bd","#8c564b","#2ca02c",
+  "#ffa600","#7f7f7f","#fb9a99","#33a02c","#a6cee3","#b2df8a","#cab2d6","#ffb74d","#00bcd4"
+];
+const colorByDept = (()=>{
+  const map = new Map();
+  return name=>{
+    const key = norm(name||'');
+    if(!key) return '#9e9e9e';
+    if(!map.has(key)){
+      const idx = map.size % VIVID.length;
+      map.set(key, VIVID[idx]);
     }
+    return map.get(key);
+  };
+})();
 
-    // Recalcular rangos usando SOLO los puntos del nivel
-    const allX=[], allY=[], allSize=[];
-    yearsFiltered.forEach(y=>{
-      for(const p of (byYear.get(y)||[])){
-        if(p.nivel !== nivelFiltrado) continue;
-        if(Number.isFinite(p.pim)) allX.push(p.pim), allSize.push(p.pim);
-        if(Number.isFinite(p.avance)) allY.push(p.avance);
+/* ===================== Descubrir campos (case-sensitive) ===================== */
+let FIELD = {
+  YEAR:  "ano_eje",
+  EJEC:  "ejecutora_nombre",
+  NIVEL: "nivel_gobierno_nombre",
+  DEP:   "departamento_ejecutora_nombre",
+  PIM:   "monto_pim",
+  DEV:   "monto_devengado"
+};
+
+async function discoverFields(){
+  const meta = await (await fetch(qs(`${SERVICE_BASE}/${LAYER_ID}`, { f:"json" }), {cache:'no-store'})).json();
+  if(meta.error) throw new Error(meta.error.message || "Error al leer metadatos");
+  const originals = (meta.fields||[]).map(f=>f.name);
+  const mapLC = new Map(originals.map(n=>[n.toLowerCase(), n]));
+  function pick(cands){
+    for(const c of cands){ const hit = mapLC.get(c.toLowerCase()); if(hit) return hit; }
+    throw new Error("No se encontró el campo: "+cands.join(" | "));
+  }
+  FIELD.YEAR  = pick([FIELD.YEAR,"anio_eje","anio","year"]);
+  FIELD.EJEC  = pick([FIELD.EJEC,"nombre_ejecutora","ejecutora"]);
+  FIELD.NIVEL = pick([FIELD.NIVEL,"nivel_gobierno","nivel"]);
+  FIELD.DEP   = pick([FIELD.DEP,"departamento_ejecutora","departamento"]);
+  FIELD.PIM   = pick([FIELD.PIM,"pim","monto_pim_total","pim_total"]);
+  FIELD.DEV   = pick([FIELD.DEV,"devengado","monto_dev","monto_dev_total"]);
+}
+
+/* ===================== Fetch con paginación ===================== */
+async function fetchAllPaged(){
+  const where = `${FIELD.YEAR} >= ${YEAR_START} AND ${FIELD.YEAR} <= ${YEAR_END}`;
+  let offset = 0, batch = 2000, all = [];
+  while(true){
+    const url = qs(`${SERVICE_BASE}/${LAYER_ID}/query`, {
+      where,
+      outFields: [FIELD.YEAR,FIELD.EJEC,FIELD.NIVEL,FIELD.DEP,FIELD.PIM,FIELD.DEV].join(','),
+      returnGeometry: "false",
+      orderByFields: `${FIELD.YEAR} ASC, ${FIELD.DEP} ASC, ${FIELD.EJEC} ASC`,
+      resultOffset: offset,
+      resultRecordCount: batch,
+      f: "json"
+    });
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error(`HTTP ${res.status} al consultar datos`);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || 'Error del servicio');
+    const feats = (json.features || []).map(f => f.attributes || {});
+    all = all.concat(feats);
+    if (!json.exceededTransferLimit && feats.length < batch) break;
+    offset += feats.length;
+    if (feats.length === 0) break;
+  }
+  return all;
+}
+
+/* ===================== Estado de UI ===================== */
+let allRows = [];              // crudos
+let levels = [];               // niveles únicos (para botones)
+let deps = [];                 // departamentos únicos (para dropdown)
+let selectedDeps = new Set();  // selección
+let currentLevel = null;       // nivel activo (null => primero)
+
+/* ===================== Indexación y agregación ===================== */
+function buildIndexes(rows){
+  // niveles
+  levels = Array.from(new Set(rows.map(r => String(r[FIELD.NIVEL]||'').trim()).filter(Boolean)));
+  // departamentos
+  deps = Array.from(new Set(rows.map(r => String(r[FIELD.DEP]||'').trim()).filter(Boolean)))
+        .sort((a,b)=>a.localeCompare(b,'es'));
+  selectedDeps = new Set(deps); // todos por defecto
+}
+
+function aggregate(rows){
+  // Agrega por (año, ejecutora, nivel, departamento)
+  const map = new Map();
+  for(const r of rows){
+    const year = Number(r[FIELD.YEAR]);
+    const ejecutora = String(r[FIELD.EJEC]||'').trim();
+    const nivel = String(r[FIELD.NIVEL]||'').trim();
+    const dep = String(r[FIELD.DEP]||'').trim();
+    const pim = Number(r[FIELD.PIM]);
+    const dev = Number(r[FIELD.DEV]);
+    if(!Number.isFinite(year) || !ejecutora || !dep) continue;
+
+    const key = `${year}|${ejecutora}|${nivel}|${dep}`;
+    if(!map.has(key)) map.set(key, {year, ejecutora, nivel, dep, pim:0, dev:0});
+    const obj = map.get(key);
+    if(Number.isFinite(pim)) obj.pim += pim;
+    if(Number.isFinite(dev)) obj.dev += dev;
+  }
+  const out = [];
+  for(const o of map.values()){
+    o.avance = (o.pim>0 && Number.isFinite(o.dev)) ? (o.dev/o.pim)*100 : NaN;
+    out.push(o);
+  }
+  return out;
+}
+
+/* ===================== UI builders ===================== */
+function renderLevelButtons(){
+  const host = document.getElementById('nivelesBtns');
+  host.innerHTML = '';
+  if(!levels.length) return;
+  if(!currentLevel) currentLevel = levels[0];
+
+  levels.forEach(lvl=>{
+    const btn = document.createElement('button');
+    btn.className = 'seg-btn' + (lvl===currentLevel? ' active':'');
+    btn.textContent = lvl;
+    btn.addEventListener('click', async ()=>{
+      if(currentLevel===lvl) return;
+      host.querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      currentLevel = lvl;
+      await render();
+    });
+    host.appendChild(btn);
+  });
+}
+
+function renderDepDropdown(){
+  const list = document.getElementById('depList');
+  list.innerHTML = '';
+  deps.forEach(dep=>{
+    const id = 'dep_'+dep.replace(/\s+/g,'_');
+    const row = document.createElement('label');
+    row.className = 'dd-row';
+    row.innerHTML = `
+      <input type="checkbox" id="${id}" ${selectedDeps.has(dep)?'checked':''} data-dep="${dep}">
+      <span>${toTitleCaseEs(dep)}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ===================== Transformar a estructura por año ===================== */
+function buildByYear(rows){
+  // Filtros: nivel + departamentos seleccionados
+  const filtered = rows.filter(r =>
+    (!currentLevel || String(r.nivel)===String(currentLevel)) &&
+    selectedDeps.has(r.dep)
+  );
+
+  const years = new Set();
+  const byYear = new Map(); // y -> array puntos
+  let allX=[], allY=[], allS=[];
+
+  for(const r of filtered){
+    years.add(r.year);
+    if(!byYear.has(r.year)) byYear.set(r.year, []);
+    byYear.get(r.year).push(r);
+
+    if(Number.isFinite(r.pim)) allX.push(r.pim), allS.push(r.pim);
+    if(Number.isFinite(r.avance)) allY.push(r.avance);
+  }
+  return { years: Array.from(years).sort((a,b)=>a-b), byYear, allX, allY, allS };
+}
+
+/* ===================== ECharts option ===================== */
+function buildOptionStruct(byYear, years, allX, allY, allS){
+  if(!years.length) throw new Error('No hay datos para los filtros seleccionados.');
+
+  // Escalas
+  const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
+  const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
+  const xPad=(xQ95-xQ05)*0.08, yPad=(yQ95-yQ05)*0.06;
+  const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
+  const xInitMin = Math.max(0, Math.min(xQ05 - xPad, xMinAll));
+  const xInitMax = Math.max(xQ95 + xPad, xMaxAll);
+  const yInitMin = 0;
+  const yInitMax = Math.min(100, Math.max((yQ95+yPad), yMaxAll, 20));
+
+  const sizeFn = makeSizeFn(allS, 14, 90);
+
+  // Año grande en esquina
+  const yearX = xInitMin + 0.85 * (xInitMax - xInitMin);
+  const yearY = yInitMin;
+
+  const options = years.map(y=>{
+    const pts = (byYear.get(y)||[]).map(p=>({
+      value:[p.pim, p.avance, p.ejecutora, p.nivel, p.dep, y],
+      itemStyle:{
+        color: colorByDept(p.dep),
+        opacity: DOT_BORDER.opacity,
+        borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width, borderType: DOT_BORDER.type
+      },
+      emphasis:{
+        itemStyle:{ borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width+0.6, borderType: DOT_BORDER.type },
+        scale:1.08, focus:'self'
+      },
+      label:{ show:true, formatter:(o)=>toTitleCaseEs(o.value[2]), position:'right', fontSize:11, color:'#333' },
+      symbolSize: sizeFn(p.pim)
+    }));
+
+    return {
+      series:[
+        { name:String(y), type:'scatter', data:pts },
+        { name:'yearLabel', type:'scatter', data:[[yearX, yearY]], symbolSize:0, silent:true, tooltip:{show:false},
+          label:{ show:true, formatter:String(y), position:'top', distance:12, color:'#e5e7eb', fontSize:32, fontWeight:700 } }
+      ]
+    };
+  });
+
+  return {
+    baseOption:{
+      timeline:{
+        axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
+        playInterval:2200, right:0, top:20, bottom:20, width:60, symbol:'none',
+        checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
+        data: years
+      },
+      title:[{ text:'Evolución del Avance por Ejecutora y Nivel de Gobierno',
+        left:'center', top:8, textStyle:{ fontWeight:700, fontSize:16 } }],
+      tooltip:{
+        padding:6, borderWidth:1, trigger:'item',
+        formatter:(obj)=>{
+          const [pim, avance, ejecutora, nivel, dep, year] = obj.value;
+          const xTxt = Number.isFinite(pim)    ? moneyFmt(pim) : '—';
+          const yTxt = Number.isFinite(avance) ? p2.format(avance) + '%' : '—';
+          return `
+            <b>${toTitleCaseEs(ejecutora)}</b><br>
+            Año: <b>${year}</b><br>
+            Nivel de Gobierno: <b>${nivel}</b><br>
+            Departamento: <b>${toTitleCaseEs(dep)}</b><br>
+            % Avance (Y): <b>${yTxt}</b><br>
+            PIM (X): <b>${xTxt}</b>
+          `;
+        }
+      },
+      grid:{ top:90, left:48, right:150, bottom:92, containLabel:true },
+      xAxis:{ type:'value', name:'PIM (S/)', nameGap:25, nameLocation:'middle',
+        min:xInitMin, max:xInitMax, scale:true, splitLine:{ show:true },
+        axisLabel:{ formatter:(v)=> moneyFmt(v) } },
+      yAxis:{ type:'value', name:'% Avance', min:yInitMin, max:yInitMax, scale:false, splitLine:{ show:true },
+        axisLabel:{ formatter:(v)=> `${p0.format(v)}%` } },
+      dataZoom:[
+        { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
+        { type:'inside', xAxisIndex:0, filterMode:'none' },
+        { type:'slider', yAxisIndex:0, filterMode:'none', right:6, width:12 },
+        { type:'inside', yAxisIndex:0, filterMode:'none' }
+      ],
+      series:[{ type:'scatter', data:[] }],
+      animationDurationUpdate:900,
+      animationEasingUpdate:'quinticInOut'
+    },
+    options
+  };
+}
+
+/* ===================== Render ===================== */
+async function render(){
+  const agg = aggregate(allRows);
+  const {years, byYear, allX, allY, allS} = buildByYear(agg);
+  const option = buildOptionStruct(byYear, years, allX, allY, allS);
+  chart.setOption(option, true);
+}
+
+/* ===================== Run ===================== */
+(async function run(){
+  try{
+    chart.showLoading({ text:'Cargando datos…' });
+
+    // 1) Detectar campos
+    await discoverFields();
+
+    // 2) Traer todo (con paginación) y preparar índices UI
+    const raw = await fetchAllPaged();
+    // Guardar crudos con nombres amigables para agregar
+    allRows = raw.map(r=>({
+      [FIELD.YEAR]: Number(r[FIELD.YEAR]),
+      [FIELD.EJEC]: r[FIELD.EJEC],
+      [FIELD.NIVEL]: r[FIELD.NIVEL],
+      [FIELD.DEP]: r[FIELD.DEP],
+      [FIELD.PIM]: Number(r[FIELD.PIM]),
+      [FIELD.DEV]: Number(r[FIELD.DEV])
+    }));
+    buildIndexes(allRows);
+    renderLevelButtons();
+    renderDepDropdown();
+
+    chart.hideLoading();
+    await render();
+
+    // ========= Interacción del dropdown =========
+    const dd = document.getElementById('depDD');
+    const trigger = document.getElementById('depTrigger');
+    const panel = document.getElementById('depPanel');
+    const listEl = document.getElementById('depList');
+    const searchEl = document.getElementById('depSearch');
+    const selAllBtn = document.getElementById('selAll');
+    const selNoneBtn = document.getElementById('selNone');
+
+    function closeOnOutside(e){ if(!dd.contains(e.target)) dd.classList.remove('open'); }
+    trigger.addEventListener('click', ()=>{
+      dd.classList.toggle('open');
+      if(dd.classList.contains('open')) document.addEventListener('click', closeOnOutside, { once:true });
+    });
+
+    // Buscar
+    searchEl.addEventListener('input', ()=>{
+      const q = searchEl.value.trim().toLowerCase();
+      for(const row of listEl.querySelectorAll('.dd-row')){
+        const txt = row.textContent.trim().toLowerCase();
+        row.style.display = txt.includes(q) ? '' : 'none';
       }
     });
 
-    const xQ05=quantile(allX,0.05), xQ95=quantile(allX,0.95);
-    const yQ05=quantile(allY,0.05), yQ95=quantile(allY,0.95);
-    const xPad=(xQ95-xQ05)*0.08, yPad=(yQ95-yQ05)*0.06;
-    const [xMinAll,xMaxAll]=extent(allX), [yMinAll,yMaxAll]=extent(allY);
-    const xInitMin = Math.max(0, Math.min(xQ05 - xPad, xMinAll));
-    const xInitMax = Math.max(xQ95 + xPad, xMaxAll);
-    const yInitMin = 0;
-    const yInitMax = Math.min(100, Math.max((yQ95+yPad), yMaxAll, 20));
-    const sizeFn = makeSizeFn(allSize, 8, 74);
-
-    const options = yearsFiltered.map(y=>{
-      const points = (byYear.get(y)||[])
-        .filter(p => p.nivel === nivelFiltrado)
-        .map(p=>({
-          value:[p.pim, p.avance, p.dep, p.nivel, y],
-          itemStyle:{
-            color: colorForNivel(p.nivel),
-            opacity: DOT_BORDER.opacity,
-            borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width, borderType: DOT_BORDER.type
-          },
-          emphasis:{
-            itemStyle:{ borderColor: DOT_BORDER.color, borderWidth: DOT_BORDER.width+0.6, borderType: DOT_BORDER.type },
-            scale:1.08, focus:'self'
-          },
-          label:{ show:true, formatter:(o)=>o.value[2], position:'right', fontSize:10, color:'#333' }
-        }));
-
-      return {
-        // Sin títulos dentro del gráfico
-        series:[{ name:String(y), type:'scatter', data:points, symbolSize:(val)=>sizeFn(val[0]) }]
-      };
+    // Select all / none
+    selAllBtn.addEventListener('click', async ()=>{
+      selectedDeps = new Set(deps);
+      renderDepDropdown();
+      chart.showLoading({ text:'Actualizando…' }); await render(); chart.hideLoading();
+    });
+    selNoneBtn.addEventListener('click', async ()=>{
+      selectedDeps = new Set();
+      renderDepDropdown();
+      chart.showLoading({ text:'Actualizando…' }); await render(); chart.hideLoading();
     });
 
-    return {
-      baseOption:{
-        timeline:{
-          axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
-          playInterval:2200, right:0, top:20, bottom:20, width:60, symbol:'none',
-          checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
-          data: yearsFiltered
-        },
-        tooltip:{
-          padding:6, borderWidth:1, trigger:'item',
-          formatter:(obj)=>{
-            const [pim, avance, dep, nivel, year] = obj.value;
-            const xTxt = Number.isFinite(pim)    ? moneyFmt(pim) : '—';
-            const yTxt = Number.isFinite(avance) ? p2.format(avance) + '%' : '—';
-            return `
-              <b>${dep}</b><br>
-              Nivel: <b>${nivel}</b><br>
-              Año: <b>${year}</b><br>
-              % Avance (Y): <b>${yTxt}</b><br>
-              PIM (X): <b>${xTxt}</b>
-            `;
-          }
-        },
-        grid:{ top:16, left:60, right:150, bottom:90, containLabel:true },
-        xAxis:{ type:'value', name:'PIM (S/)', nameGap:25, nameLocation:'middle',
-          min:xInitMin, max:xInitMax, scale:true, splitLine:{ show:true },
-          axisLabel:{ formatter:(v)=> moneyFmt(v) } },
-        yAxis:{ type:'value', name:'% Avance', min:yInitMin, max:yInitMax, scale:false, splitLine:{ show:true },
-          axisLabel:{ formatter:(v)=> `${new Intl.NumberFormat('es-PE',{maximumFractionDigits:0}).format(v)}%` } },
-        dataZoom:[
-          { type:'slider', xAxisIndex:0, filterMode:'none', bottom:12, height:28 },
-          { type:'inside', xAxisIndex:0, filterMode:'none' },
-          { type:'slider', yAxisIndex:0, filterMode:'none', right:6, width:12 },
-          { type:'inside', yAxisIndex:0, filterMode:'none' }
-        ],
-        series:[{ type:'scatter', data:[] }],
-        animationDurationUpdate:800,
-        animationEasingUpdate:'quinticInOut'
-      },
-      options
-    };
-  }
-
-  function buildTabs(presentLevels, onSelect){
-    const order = ["GOBIERNO NACIONAL","GOBIERNO REGIONAL","GOBIERNO LOCAL","SIN ESPECIFICAR"];
-    const levels = order.filter(l => presentLevels.includes(l));
-    const tabsEl = document.getElementById('tabs');
-    tabsEl.innerHTML = '';
-    levels.forEach((lvl, i)=>{
-      const b = document.createElement('button');
-      b.className = 'tab' + (i===0 ? ' active' : '');
-      b.dataset.level = lvl;
-      b.textContent = lvl.replace('GOBIERNO ','Gobierno ');
-      b.addEventListener('click', ()=>{
-        [...tabsEl.children].forEach(x=>x.classList.remove('active'));
-        b.classList.add('active');
-        onSelect(lvl);
-      });
-      tabsEl.appendChild(b);
+    // Cambios en checks
+    listEl.addEventListener('change', async (e)=>{
+      const t = e.target;
+      if(t && t.matches('input[type="checkbox"][data-dep]')){
+        const dep = t.getAttribute('data-dep');
+        if(t.checked) selectedDeps.add(dep); else selectedDeps.delete(dep);
+        chart.showLoading({ text:'Actualizando…' }); await render(); chart.hideLoading();
+      }
     });
-    return levels[0] || "GOBIERNO NACIONAL";
+
+    // Reflow
+    window.addEventListener('resize', ()=>chart.resize());
+  }catch(err){
+    console.error(err);
+    chart.hideLoading();
+    chart.setOption({
+      title:{ text:'Error al cargar datos', left:'center' },
+      graphic:{ type:'text', left:'center', top:'middle',
+        style:{ text:(err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
+    });
   }
-
-  (async ()=>{
-    try{
-      chart.showLoading({ text: "Cargando datos…" });
-      const { byYear, years, presentLevels } = await fetchAggregated();
-      if(!years.length) throw new Error("Sin datos en el rango de años indicado.");
-
-      const initialLevel = buildTabs(presentLevels, (lvl)=>{
-        const opt = buildOption(byYear, years, lvl);
-        chart.setOption(opt, true); // notMerge para resetear timeline/axes
-      });
-
-      const initialOpt = buildOption(byYear, years, initialLevel);
-      chart.hideLoading();
-      chart.setOption(initialOpt, true);
-
-      window.addEventListener('resize', ()=>chart.resize());
-    }catch(err){
-      console.error(err);
-      chart.hideLoading();
-      chart.setOption({
-        graphic:{ type:'text', left:'center', top:'middle',
-          style:{ text:(err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
-      });
-    }
-  })();
 })();
 </script>
 </body>
