@@ -35,8 +35,22 @@
 
   // ======= Helpers =======
   const nf1 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const nf0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
   const norm = (s)=> String(s||'').replace(/\s+/g,' ').trim();
   const up   = (s)=> norm(s).toUpperCase();
+
+  // Formateo de valor_recuento
+  function formatRecuento(v){
+    if(v==null || isNaN(v)) return '';
+    const n = Number(v);
+    if (Math.abs(n) >= 1000){
+      // truncado a 1 decimal (no redondeo) -> 19883.5 => 19.8 mil
+      const t = Math.trunc((Math.abs(n)/1000)*10)/10;
+      const sign = n < 0 ? '-' : '';
+      return `${sign}${t.toLocaleString('es-PE',{minimumFractionDigits:1,maximumFractionDigits:1})} mil`;
+    }
+    return nf0.format(n);
+  }
 
   const $err = document.getElementById('err');
   const $loading = document.getElementById('loading');
@@ -107,12 +121,19 @@
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
+      // Tooltip con porcentaje + recuento formateado
       formatter: (params)=>{
+        const opt = chart.getOption();
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
         (params||[]).forEach(p=>{
           const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%`;
-          lines.push(`${p.marker} ${p.seriesName}: <b>${v}</b>`);
+          // buscar recuento almacenado en la serie
+          const serOpt = opt.series[p.seriesIndex] || {};
+          const recMap = serOpt._recByYear || {};
+          const rec = recMap[String(year)];
+          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}`;
+          lines.push(`${p.marker} ${p.seriesName}: <b>${v}</b>${recTxt}`);
         });
         return lines.join('<br/>');
       }
@@ -147,14 +168,15 @@
       valor : resolveFieldName(info.data, ["valor_porcentaje","valor porcentaje","valor_porcentual"]),
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
-      dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"])
+      dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
+      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"])
     };
     if(Object.values(fields).some(v=>!v)) throw new Error("Campos requeridos no hallados.");
   }
 
   // ======= Serie (líneas) para region=NACIONAL =======
   async function loadLine(){
-    const {anio, ambito, valor, region, ind, dvals} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
 
     // Coincidencia robusta (UPPER)
     const where =
@@ -162,7 +184,7 @@
 
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [anio,ambito,valor].join(","),
+      outFields: [anio,ambito,valor,rec].join(","),
       orderByFields: `${anio} ASC, ${ambito} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -173,27 +195,33 @@
 
     const raw = features.map(f=>f.attributes)
       .filter(r => r && r[anio] != null && r[ambito] != null && r[valor] != null)
-      .map(r => ({ anio: Number(r[anio]), ambito: up(r[ambito]), valor: Number(r[valor]) }));
+      .map(r => ({
+        anio: Number(r[anio]),
+        ambito: up(r[ambito]),
+        valor: Number(r[valor]),
+        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+      }));
 
     // 0..1 -> % si corresponde
     const maxRaw = Math.max(...raw.map(r=>r.valor));
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación (ambito, anio)
+    // agregación (ambito, anio): promedio de % y suma de recuento
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
-      const cur = agg.get(key) || { sum:0, count:0 };
+      const cur = agg.get(key) || { sum:0, count:0, rec:0 };
       cur.sum += r.valor; cur.count += 1;
+      if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
       agg.set(key, cur);
     });
     const rows = Array.from(agg.entries()).map(([key, o])=>{
       const [amb, an] = key.split("|");
-      return { ambito: amb, anio: Number(an), valor: o.sum / o.count };
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec };
     });
 
-    // Mostrar TOTAL, URBANO, RURAL (y descartar otros)
+    // Mostrar TOTAL, URBANO, RURAL
     const VALID = new Set(['TOTAL','URBANO','RURAL']);
     const filtered = rows.filter(r => VALID.has(r.ambito));
 
@@ -203,11 +231,14 @@
 
     const seriesPrep = [];
     Object.entries(byAmb).forEach(([ambito, arr])=>{
-      const m = new Map(arr.map(o=>[String(o.anio), o.valor]));
-      const data = years.map(y => (m.has(y) ? Number(m.get(y)) : null));
+      const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
+      const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento]));
+      const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
       const valid = data.filter(v=>v!=null);
       const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      seriesPrep.push({ name: ambito, data, mean });
+      const recByYear = {};
+      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      seriesPrep.push({ name: ambito, data, mean, recByYear });
     });
 
     // Orden de botones: TOTAL → URBANO → RURAL
@@ -245,6 +276,7 @@
         clip: true,
         data: s.data,
         _color: col,
+        _recByYear: s.recByYear,   // ← mapa de recuento por año para tooltip
         label: {
           show: true,
           position: 'top',
@@ -294,7 +326,7 @@
 
   // ======= Drilldown (barras por región) =======
   async function loadBars({year, amb, color}){
-    const {anio, ambito, valor, region, ind, dvals} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
 
     const ambForRegions = amb; // TOTAL/URBANO/RURAL ya está listo
 
@@ -304,7 +336,7 @@
 
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [region, valor].join(","),
+      outFields: [region, valor, rec].join(","),
       orderByFields: `${region} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -315,30 +347,37 @@
 
     const raw = features.map(f=>f.attributes)
       .filter(r => r && r[region] && r[valor]!=null)
-      .map(r => ({ region: norm(r[region]), valor: Number(r[valor]) }));
+      .map(r => ({
+        region: norm(r[region]),
+        valor: Number(r[valor]),
+        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+      }));
 
     // 0..1 -> %
     const maxRaw = Math.max(...raw.map(r=>r.valor));
     const scale = (maxRaw <= 1.5) ? 100 : 1;
 
-    // Agregar por región (promedio)
+    // Agregar por región (promedio de % y suma de recuento)
     const agg = new Map();
     raw.forEach(r=>{
       const key = up(r.region);
-      const cur = agg.get(key) || { name: r.region, sum: 0, count: 0 };
+      const cur = agg.get(key) || { name: r.region, sum: 0, count: 0, rec: 0 };
       cur.sum += r.valor * scale;
       cur.count += 1;
+      if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
       agg.set(key, cur);
     });
     const rows = Array.from(agg.values()).map(o => ({
       region: o.name,
-      valor : o.sum / o.count
+      valor : o.sum / o.count,
+      recuento: o.rec
     }));
 
     rows.sort((a,b)=>b.valor-a.valor);
 
     const x = rows.map(r=>r.region);
     const y = rows.map(r=>r.valor);
+    const recs = rows.map(r=>r.recuento);
 
     chart.clear();
     chart.setOption({
@@ -351,7 +390,9 @@
         formatter: (params)=>{
           const p = params && params[0];
           if(!p) return '';
-          return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>`;
+          const recHere = recs[p.dataIndex];
+          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}`;
+          return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>${recTxt}`;
         }
       },
       title: { left: 'center', top: 10, text: `Pob. con Cl residual ≥0.5 mg/L — ${ambForRegions} — ${year}` },
@@ -407,3 +448,4 @@
 </script>
 </body>
 </html>
+
