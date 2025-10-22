@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>  
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
@@ -48,17 +48,22 @@
   const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
   const normalizeAmb = (s)=> String(s||'').trim().toUpperCase();
 
-  // ==== formato de valor_recuento
-  function formatRecuento(v){
-    if(v==null || isNaN(v)) return '';
-    const n = Number(v);
-    if (Math.abs(n) >= 1000){
-      // truncado a 1 decimal (no redondeo): 19883.5 -> 19.8 mil
-      const t = Math.trunc((Math.abs(n)/1000)*10)/10;
-      const sign = n < 0 ? '-' : '';
-      return `${sign}${t.toLocaleString('es-PE',{minimumFractionDigits:1,maximumFractionDigits:1})} mil`;
+  // ==== formato de valor_recuento (LOS VALORES VIENEN EN MILES)
+  // Mostrar SIEMPRE 1 decimal y el sufijo correcto:
+  // - Si >= 1,000 (miles) → mostrar en "millones" (miles/1000).
+  // - Si < 1,000 (miles)  → mostrar en "mil".
+  function formatRecuento(vThousands){
+    if(vThousands==null || isNaN(vThousands)) return '';
+    const n = Number(vThousands);
+    const sign = n < 0 ? '-' : '';
+    const absT = Math.abs(n); // en miles
+    if(absT >= 1000){
+      const millions = absT / 1000; // 1000 miles = 1 millón
+      const txt = millions.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+      return `${sign}${txt} millones`;
     }
-    return nf0.format(n);
+    const txtMil = absT.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+    return `${sign}${txtMil} mil`;
   }
 
   // ==== dom
