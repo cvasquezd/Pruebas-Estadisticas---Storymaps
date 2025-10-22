@@ -38,27 +38,35 @@
   // ==== util colores
   const BASE_HEX = "#2F4858";
   function hexToHsl(hex){
-    const m=hex.replace('#',''); const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
+    const m=hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
     const max=Math.max(r,g,b), min=Math.min(r,g,b); let h,s,l=(max+min)/2;
-    if(max===min){h=s=0;} else {const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
-      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;} h/=6;}
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}
+      h/=6;
+    }
     return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
   }
   const baseHSL = hexToHsl(BASE_HEX);
   const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
   const normalizeAmb = (s)=> String(s||'').trim().toUpperCase();
 
-  // ==== formato recuento
-  function formatRecuento(v){
-    if(v==null || isNaN(v)) return '';
-    const n = Number(v);
-    if (Math.abs(n) >= 1000){
-      // truncar a 1 decimal (no redondear) para coincidir con el ejemplo 19883.5 -> 19.8 mil
-      const t = Math.trunc((Math.abs(n)/1000) * 10) / 10;
-      const sign = n < 0 ? '-' : '';
-      return `${sign}${t.toLocaleString('es-PE', {minimumFractionDigits:1, maximumFractionDigits:1})} mil`;
+  // ==== formato recuento (valores en MILES). Mostrar SIEMPRE 1 decimal y sufijo "mil"/"millones".
+  function formatRecuento(vThousands){
+    if(vThousands == null || isNaN(vThousands)) return '';
+    const n = Number(vThousands);
+    const sign = n < 0 ? '-' : '';
+    const absT = Math.abs(n); // en miles
+    if(absT >= 1000){
+      const millions = absT / 1000; // 1000 miles = 1 millón
+      const txt = millions.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+      return `${sign}${txt} millones`;
+    }else{
+      const txt = absT.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+      return `${sign}${txt} mil`;
     }
-    return nf0.format(n);
   }
 
   // ==== dom
@@ -106,7 +114,6 @@
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
-      // Tooltip de línea: agrega recuento formateado
       formatter: (params)=>{
         const opt = chart.getOption();
         const year = params?.[0]?.axisValue ?? '';
@@ -114,7 +121,6 @@
         (params||[]).forEach(p=>{
           const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%`;
           const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
-          // buscar recuento en el mapa adjunto a la serie
           const serOpt = opt.series[p.seriesIndex] || {};
           const recMap = serOpt._recByYear || {};
           const rec = recMap[String(year)];
@@ -202,7 +208,7 @@
         anio: Number(r[anio]),
         ambito: normalizeAmb(r[ambito]),
         valor: Number(r[valor]),
-        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+        recuento: (r[rec]!=null ? Number(r[rec]) : null) // en miles
       }));
 
     // escalar % si viene en [0,1]
@@ -210,13 +216,13 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación por (ambito, anio): promedio de %, suma de recuento
+    // agregación por (ambito, anio): promedio de %, suma de recuento (miles)
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
       const cur = agg.get(key) || { sum:0, count:0, rec:0 };
       cur.sum += r.valor; cur.count += 1;
-      if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
+      if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento; // miles
       agg.set(key, cur);
     });
     const rows = Array.from(agg.entries()).map(([key, o])=>{
@@ -231,12 +237,12 @@
     const seriesPrep = [];
     Object.entries(byAmb).forEach(([amb, arr])=>{
       const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
-      const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento]));
+      const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento])); // miles
       const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
       const valid = data.filter(v=>v!=null);
       const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
       const recByYear = {};
-      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); }); // miles
       seriesPrep.push({ name: amb, data, mean, recByYear });
     });
 
@@ -277,7 +283,7 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear   // ← mapa año -> recuento para tooltip
+        _recByYear: s.recByYear   // ← mapa año -> recuento (en miles)
       };
     });
 
@@ -357,23 +363,23 @@
     const features = (res.data && res.data.features) || [];
     if(!features.length) throw new Error(`Sin datos para ${amb} en ${year}.`);
 
-    // puede venir más de un registro por región -> agregamos: promedio de % y suma de recuento
+    // Agregar por región: promedio % y suma recuento (en miles)
     const tmp = new Map();
     features.forEach(f=>{
       const r = f.attributes;
       const reg = String(r[region]);
       const v   = Number(r[valor]);
-      const rc  = (r[rec]!=null ? Number(r[rec]) : null);
+      const rc  = (r[rec]!=null ? Number(r[rec]) : null); // miles
       const it = tmp.get(reg) || { sum:0, c:0, rec:0 };
       it.sum += v; it.c += 1;
-      if(rc!=null && !isNaN(rc)) it.rec += rc;
+      if(rc!=null && !isNaN(rc)) it.rec += rc; // miles
       tmp.set(reg, it);
     });
 
     let rows = Array.from(tmp.entries()).map(([reg, o])=>({
       region: reg,
       valor: o.sum / o.c,
-      recuento: o.rec
+      recuento: o.rec // miles
     }));
 
     // escalar % si viene en [0,1]
@@ -384,7 +390,7 @@
 
     const x = rows.map(r=>r.region);
     const y = rows.map(r=>r.valor);
-    const recs = rows.map(r=>r.recuento);
+    const recs = rows.map(r=>r.recuento); // miles
 
     chart.clear();
     chart.setOption({
@@ -397,7 +403,7 @@
         formatter: (params)=>{
           const p = params && params[0];
           if(!p) return '';
-          const recHere = recs[p.dataIndex];
+          const recHere = recs[p.dataIndex]; // miles
           const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}`;
           return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>${recTxt}`;
         }
