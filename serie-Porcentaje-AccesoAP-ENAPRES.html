@@ -52,6 +52,10 @@
   const baseHSL = hexToHsl(BASE_HEX);
   const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
   const normalizeAmb = (s)=> String(s||'').trim().toUpperCase();
+  const cleanFlag = (v)=> {
+    const t = String(v==null?'':v).trim();
+    return t ? t : '';
+  };
 
   // ==== formato recuento (valores en MILES). Mostrar SIEMPRE 1 decimal y sufijo "mil"/"millones".
   function formatRecuento(vThousands){
@@ -119,13 +123,20 @@
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
         (params||[]).forEach(p=>{
-          const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%`;
-          const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
           const serOpt = opt.series[p.seriesIndex] || {};
+          const flagMap = serOpt._flagByYear || {};
+          const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
+          const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
+
+          // porcentaje con flag
+          const vTxt = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%${flagSuf}`;
+
+          // recuento con flag si existe
           const recMap = serOpt._recByYear || {};
           const rec = recMap[String(year)];
-          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}`;
-          lines.push(`${p.marker} ${displayName}: <b>${v}</b>${recTxt}`);
+          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}${flagSuf}`;
+
+          lines.push(`${p.marker} ${displayName}: <b>${vTxt}</b>${recTxt}`);
         });
         return lines.join('<br/>');
       }
@@ -162,9 +173,12 @@
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
       dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
-      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"])
+      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← NUEVO
     };
-    if(Object.values(fields).some(v=>!v)) throw new Error("Campos requeridos no hallados.");
+    if(!fields.anio || !fields.ambito || !fields.valor || !fields.region || !fields.ind || !fields.dvals){
+      throw new Error("Campos requeridos no hallados.");
+    }
   }
 
   function backGraphic(color, onClick){
@@ -184,16 +198,18 @@
 
   // ========= Línea (NACIONAL) =========
   async function loadLine(){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
     const where =
       `UPPER(${region})='${REGION_TOTAL}' AND ` +
       `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
       `UPPER(${dvals})=UPPER('${D_VALORES}')`;
 
+    const outFields = [anio,ambito,valor,rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [anio,ambito,valor,rec].join(","),
+      outFields,
       orderByFields: `${anio} ASC, ${ambito} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -208,7 +224,8 @@
         anio: Number(r[anio]),
         ambito: normalizeAmb(r[ambito]),
         valor: Number(r[valor]),
-        recuento: (r[rec]!=null ? Number(r[rec]) : null) // en miles
+        recuento: (r[rec]!=null ? Number(r[rec]) : null), // en miles
+        flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
     // escalar % si viene en [0,1]
@@ -216,18 +233,19 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación por (ambito, anio): promedio de %, suma de recuento (miles)
+    // agregación por (ambito, anio): promedio de %, suma de recuento (miles) y consolidación de flags
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
-      const cur = agg.get(key) || { sum:0, count:0, rec:0 };
+      const cur = agg.get(key) || { sum:0, count:0, rec:0, flags:new Set() };
       cur.sum += r.valor; cur.count += 1;
       if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento; // miles
+      if(r.flag) cur.flags.add(r.flag);
       agg.set(key, cur);
     });
     const rows = Array.from(agg.entries()).map(([key, o])=>{
       const [amb, an] = key.split("|");
-      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec };
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec, flag: Array.from(o.flags).join('') };
     });
 
     const years = Array.from(new Set(rows.map(r=>r.anio))).sort((a,b)=>a-b).map(String);
@@ -238,12 +256,13 @@
     Object.entries(byAmb).forEach(([amb, arr])=>{
       const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
       const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento])); // miles
+      const mFlg = new Map(arr.map(o=>[String(o.anio), o.flag]));     // texto
       const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
       const valid = data.filter(v=>v!=null);
       const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      const recByYear = {};
-      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); }); // miles
-      seriesPrep.push({ name: amb, data, mean, recByYear });
+      const recByYear = {}; years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      const flagByYear= {}; years.forEach(y=>{ const fv = mFlg.get(y); if(fv) flagByYear[y] = fv; });
+      seriesPrep.push({ name: amb, data, mean, recByYear, flagByYear });
     });
 
     // orden series
@@ -283,7 +302,8 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear   // ← mapa año -> recuento (en miles)
+        _recByYear: s.recByYear,    // mapa año -> recuento (miles)
+        _flagByYear: s.flagByYear   // mapa año -> string de flag (p.ej. "*")
       };
     });
 
@@ -313,7 +333,7 @@
       graphic: []
     });
 
-    // etiquetas tras animación
+    // etiquetas tras animación (sin flag, solo tooltip)
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -343,7 +363,7 @@
 
   // ========= Barras (DRILLDOWN) =========
   async function loadBars({year, amb, color}){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
@@ -352,9 +372,11 @@
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `UPPER(${ambito}) LIKE '%${amb}%'`;
 
+    const outFields = [region,valor,ambito,rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [region,valor,ambito,rec].join(","),
+      outFields,
       orderByFields: `${region} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -363,23 +385,26 @@
     const features = (res.data && res.data.features) || [];
     if(!features.length) throw new Error(`Sin datos para ${amb} en ${year}.`);
 
-    // Agregar por región: promedio % y suma recuento (en miles)
+    // Agregar por región: promedio % y suma recuento (en miles) + consolidación de flags
     const tmp = new Map();
     features.forEach(f=>{
       const r = f.attributes;
       const reg = String(r[region]);
       const v   = Number(r[valor]);
       const rc  = (r[rec]!=null ? Number(r[rec]) : null); // miles
-      const it = tmp.get(reg) || { sum:0, c:0, rec:0 };
+      const flg = flag ? cleanFlag(r[flag]) : '';
+      const it = tmp.get(reg) || { sum:0, c:0, rec:0, flags:new Set() };
       it.sum += v; it.c += 1;
       if(rc!=null && !isNaN(rc)) it.rec += rc; // miles
+      if(flg) it.flags.add(flg);
       tmp.set(reg, it);
     });
 
     let rows = Array.from(tmp.entries()).map(([reg, o])=>({
       region: reg,
       valor: o.sum / o.c,
-      recuento: o.rec // miles
+      recuento: o.rec,                 // miles
+      flag: Array.from(o.flags).join('') // p.ej. "*" o "**"
     }));
 
     // escalar % si viene en [0,1]
@@ -390,7 +415,8 @@
 
     const x = rows.map(r=>r.region);
     const y = rows.map(r=>r.valor);
-    const recs = rows.map(r=>r.recuento); // miles
+    const recs  = rows.map(r=>r.recuento); // miles
+    const flags = rows.map(r=>r.flag||'');
 
     chart.clear();
     chart.setOption({
@@ -403,9 +429,12 @@
         formatter: (params)=>{
           const p = params && params[0];
           if(!p) return '';
-          const recHere = recs[p.dataIndex]; // miles
-          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}`;
-          return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>${recTxt}`;
+          const idx = p.dataIndex;
+          const flagSuf = flags[idx] ? String(flags[idx]) : '';
+          const recHere = recs[idx];
+          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}${flagSuf}`;
+          const vTxt = `${nf1.format(+p.value)}%${flagSuf}`;
+          return `${p.axisValueLabel}<br><b>${vTxt}</b>${recTxt}`;
         }
       },
       title: { left: 'center', top: 10, text: `Acceso a agua — ${amb} — ${year}` },
