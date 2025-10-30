@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
@@ -47,7 +47,7 @@
     .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
 
     /* ===== Desplegable departamentos ===== */
-    .dd{ position:relative; margin-right:14px; } /* más distancia antes de "Total" */
+    .dd{ position:relative; margin-right:14px; }
     .dd-panel{
       position:absolute; top:110%; left:0;
       background:#fff; border:1px solid #e5e7eb; border-radius:12px;
@@ -74,7 +74,6 @@
 
   <!-- Segmentación + filtro -->
   <div class="seg-bar" aria-label="Controles">
-    <!-- Filtro departamentos (a la izquierda del botón Total) -->
     <div class="dd" id="regionDD">
       <button class="dd-trigger" id="regionTrigger">Filtrar Departamentos</button>
       <div class="dd-panel" id="regionPanel" role="listbox" aria-multiselectable="true">
@@ -178,7 +177,8 @@ async function fetchAllPaged(){
   while(true){
     const url = qs(`${SERVICE_BASE}/${LAYER_SERIE}/query`, {
       where,
-      outFields: "id_indicador,anio,region,ambito,d_valores,valor_porcentaje,valor_recuento",
+      /* <-- añadimos flag_coef_var para poder concatenar en tooltip */
+      outFields: "id_indicador,anio,region,ambito,d_valores,valor_porcentaje,valor_recuento,flag_coef_var",
       returnGeometry: "false",
       orderByFields: "anio ASC, region ASC",
       resultOffset: offset,
@@ -252,10 +252,11 @@ function buildBy(rows, ambitoWanted){
     if(!byYR.has(key)) byYR.set(key, { anio:r.anio, region:r.region, ambito:r.ambito });
     const obj = byYR.get(key);
     const id = String(r.id_indicador);
-    if(id === ID_X)    obj.x_pct   = toNum(r.valor_porcentaje);
-    if(id === ID_Y)    obj.y_pct   = toNum(r.valor_porcentaje);
-    if(id === ID_SZ)   obj.sizePct = toNum(r.valor_porcentaje);
-    if(id === ID_COL)  obj.contH   = toNum(r.valor_recuento);
+    // Guardamos valores y banderas por indicador
+    if(id === ID_X){    obj.x_pct   = toNum(r.valor_porcentaje); obj.flagX = r.flag_coef_var; }
+    if(id === ID_Y){    obj.y_pct   = toNum(r.valor_porcentaje); obj.flagY = r.flag_coef_var; }
+    if(id === ID_SZ){   obj.sizePct = toNum(r.valor_porcentaje); obj.flagS = r.flag_coef_var; }
+    if(id === ID_COL){  obj.contH   = toNum(r.valor_recuento);   obj.flagC = r.flag_coef_var; }
   }
 
   const yearsSet = new Set(), byYear = new Map();
@@ -270,10 +271,6 @@ function buildBy(rows, ambitoWanted){
 
 /* ============ Construcción de opciones ECharts ============ */
 function buildOptionsStruct(byYear){
-  const pf0 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:0 });
-  const pf2 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 });
-  const pf1 = new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 });
-
   const allX=[], allY=[], allS=[];
   for(const arr of byYear.values()){
     for(const p of arr){
@@ -306,8 +303,10 @@ function buildOptionsStruct(byYear){
       if(!Number.isFinite(p.x_pct) || !Number.isFinite(p.y_pct)) return null;
       const regionPretty = toTitleCaseEs(p.region);
       const ambPretty = toTitleCaseEs(p.ambito);
+
       return {
-        value: [p.x_pct, p.y_pct, p.sizePct, regionPretty, ambPretty, p.contH],
+        // value: [x, y, size, region, ambito, contH, flagX, flagY, flagS, flagC]
+        value: [p.x_pct, p.y_pct, p.sizePct, regionPretty, ambPretty, p.contH, p.flagX || '', p.flagY || '', p.flagS || '', p.flagC || ''],
         itemStyle:{
           color: colorForContinuidad(p.contH),
           opacity: DOT_BORDER.opacity,
@@ -335,6 +334,7 @@ function buildOptionsStruct(byYear){
           symbolSize:(val)=>sizeFn(val[2]),
           label:{
             show:true,
+            // (sin cambios) solo el nombre de la región
             formatter:(p)=>p.value[3],
             position:'right', fontSize:13, color:'#333'
           }
@@ -376,11 +376,22 @@ function buildOptionsStruct(byYear){
       tooltip:{
         padding:6, borderWidth:1,
         formatter:(o)=>{
-          const [xVal,yVal,pctCl,regionPretty,ambPretty,contH]=o.value;
-          const yTxt  = Number.isFinite(yVal)? new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 }).format(yVal)+'%':'—';
-          const xTxt  = Number.isFinite(xVal)? new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 }).format(xVal)+'%':'—';
-          const cTxt  = Number.isFinite(contH)?  new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(contH)+' h':'—';
-          const sTxt  = Number.isFinite(pctCl)?  new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 }).format(pctCl)+'%':'—';
+          const [xVal,yVal,pctCl,regionPretty,ambPretty,contH,flagX,flagY,flagS,flagC] = o.value;
+
+          const fmtPct = (v, flag) => {
+            const base = Number.isFinite(v) ? new Intl.NumberFormat('es-PE',{ maximumFractionDigits:2 }).format(v)+'%' : '—';
+            return flag ? base + String(flag) : base;
+          };
+          const fmtHrs = (v, flag) => {
+            const base = Number.isFinite(v) ? new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(v)+' h' : '—';
+            return flag ? base + String(flag) : base;
+          };
+
+          const yTxt = fmtPct(yVal, flagY);
+          const xTxt = fmtPct(xVal, flagX);
+          const sTxt = fmtPct(pctCl, flagS);
+          const cTxt = fmtHrs(contH, flagC);
+
           return `<b>${regionPretty}</b> (${ambPretty})<br>
                   Acceso a agua (Y): <b>${yTxt}</b><br>
                   Acceso a Alcantarillado/DSE: <b>${xTxt}</b><br>
