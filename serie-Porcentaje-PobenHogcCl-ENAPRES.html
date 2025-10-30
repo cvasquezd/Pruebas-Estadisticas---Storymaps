@@ -38,6 +38,10 @@
   const nf0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
   const norm = (s)=> String(s||'').replace(/\s+/g,' ').trim();
   const up   = (s)=> norm(s).toUpperCase();
+  const cleanFlag = (v)=> {
+    const t = String(v==null?'':v).trim();
+    return t ? t : '';
+  };
 
   // Formateo de valor_recuento (LOS VALORES ESTÁN EN MILES).
   // Mostrar SIEMPRE 1 decimal + sufijo "mil" o "millones" según corresponda.
@@ -125,25 +129,27 @@
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
-      // Tooltip con porcentaje + recuento formateado
+      // Tooltip con porcentaje + recuento formateado + flag (si aplica)
       formatter: (params)=>{
         const opt = chart.getOption();
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
         (params||[]).forEach(p=>{
-          const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%`;
-          // buscar recuento almacenado en la serie
           const serOpt = opt.series[p.seriesIndex] || {};
-          const recMap = serOpt._recByYear || {};
+          const recMap  = serOpt._recByYear  || {};
+          const flagMap = serOpt._flagByYear || {};
+          const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
+          // % + flag
+          const vTxt = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%${flagSuf}`;
+          // recuento + flag
           const rec = recMap[String(year)];
-          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}`;
-          lines.push(`${p.marker} ${p.seriesName}: <b>${v}</b>${recTxt}`);
+          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}${flagSuf}`;
+          lines.push(`${p.marker} ${p.seriesName}: <b>${vTxt}</b>${recTxt}`);
         });
         return lines.join('<br/>');
       }
     },
     xAxis: { type:'category', boundaryGap:true, name:'Años', nameLocation:'middle', nameGap:34, axisTick:{alignWithLabel:true}, axisLabel:{ margin:14 }, animation:false, data:[] },
-    // ← nombre de eje Y solicitado
     yAxis: { type:'value', name:'%Pob. con Cl aceptable', axisLabel:{ formatter:v=>nf1.format(v), margin:12 }, splitLine:{show:true}, scale:true },
     animation: true,
     animationDuration: 1200,
@@ -173,22 +179,24 @@
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
       dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
-      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"])
+      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← campo para tooltip
     };
     if(Object.values(fields).some(v=>!v)) throw new Error("Campos requeridos no hallados.");
   }
 
   // ======= Serie (líneas) para region=NACIONAL =======
   async function loadLine(){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
-    // Coincidencia robusta (UPPER)
     const where =
       `UPPER(${region})='${REGION_TOTAL}' AND UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND UPPER(${dvals})=UPPER('${D_VALORES}')`;
 
+    const outFields = [anio,ambito,valor,rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [anio,ambito,valor,rec].join(","),
+      outFields,
       orderByFields: `${anio} ASC, ${ambito} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -203,7 +211,8 @@
         anio: Number(r[anio]),
         ambito: up(r[ambito]),
         valor: Number(r[valor]),
-        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+        recuento: (r[rec]!=null ? Number(r[rec]) : null),
+        flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
     // 0..1 -> % si corresponde
@@ -211,18 +220,19 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación (ambito, anio): promedio de % y suma de recuento
+    // agregación (ambito, anio): promedio de %; suma de recuento; consolidación de flags
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
-      const cur = agg.get(key) || { sum:0, count:0, rec:0 };
+      const cur = agg.get(key) || { sum:0, count:0, rec:0, flags:new Set() };
       cur.sum += r.valor; cur.count += 1;
       if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
+      if(r.flag) cur.flags.add(r.flag);
       agg.set(key, cur);
     });
     const rows = Array.from(agg.entries()).map(([key, o])=>{
       const [amb, an] = key.split("|");
-      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec };
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec, flag: Array.from(o.flags).join('') };
     });
 
     // Mostrar TOTAL, URBANO, RURAL
@@ -237,12 +247,13 @@
     Object.entries(byAmb).forEach(([ambito, arr])=>{
       const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
       const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento]));
+      const mFlg = new Map(arr.map(o=>[String(o.anio), o.flag]));
       const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
       const valid = data.filter(v=>v!=null);
       const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      const recByYear = {};
-      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
-      seriesPrep.push({ name: ambito, data, mean, recByYear });
+      const recByYear = {}; years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      const flagByYear= {}; years.forEach(y=>{ const f = mFlg.get(y); if(f) flagByYear[y] = f; });
+      seriesPrep.push({ name: ambito, data, mean, recByYear, flagByYear });
     });
 
     // Orden de botones: TOTAL → URBANO → RURAL
@@ -280,14 +291,15 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear,   // ← mapa de recuento por año para tooltip
+        _recByYear: s.recByYear,   // ← para tooltip
+        _flagByYear: s.flagByYear, // ← para tooltip
         label: {
           show: true,
           position: 'top',
           distance: 8,
           fontSize: 12,
           color: '#111827',
-          formatter: (p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)}%`
+          formatter: (p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)}%` // ← sin flag en etiqueta
         },
         labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' }
       };
@@ -330,7 +342,7 @@
 
   // ======= Drilldown (barras por región) =======
   async function loadBars({year, amb, color}){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
     const ambForRegions = amb; // TOTAL/URBANO/RURAL ya está listo
 
@@ -338,9 +350,11 @@
       `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND UPPER(${dvals})=UPPER('${D_VALORES}') AND ${anio}=${Number(year)} AND ` +
       `UPPER(${region})<>'${REGION_TOTAL}' AND UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
 
+    const outFields = [region, valor, rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [region, valor, rec].join(","),
+      outFields,
       orderByFields: `${region} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -354,34 +368,38 @@
       .map(r => ({
         region: norm(r[region]),
         valor: Number(r[valor]),
-        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+        recuento: (r[rec]!=null ? Number(r[rec]) : null),
+        flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // 0..1 -> %
+    // 0..1 -> % si aplica
     const maxRaw = Math.max(...raw.map(r=>r.valor));
     const scale = (maxRaw <= 1.5) ? 100 : 1;
 
-    // Agregar por región (promedio de % y suma de recuento)
+    // Agregar por región (promedio %; suma recuento; consolidación de flags)
     const agg = new Map();
     raw.forEach(r=>{
       const key = up(r.region);
-      const cur = agg.get(key) || { name: r.region, sum: 0, count: 0, rec: 0 };
+      const cur = agg.get(key) || { name: r.region, sum: 0, count: 0, rec: 0, flags: new Set() };
       cur.sum += r.valor * scale;
       cur.count += 1;
       if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
+      if(r.flag) cur.flags.add(r.flag);
       agg.set(key, cur);
     });
     const rows = Array.from(agg.values()).map(o => ({
       region: o.name,
       valor : o.sum / o.count,
-      recuento: o.rec
+      recuento: o.rec,
+      flag: Array.from(o.flags).join('')
     }));
 
     rows.sort((a,b)=>b.valor-a.valor);
 
     const x = rows.map(r=>r.region);
     const y = rows.map(r=>r.valor);
-    const recs = rows.map(r=>r.recuento);
+    const recs  = rows.map(r=>r.recuento);
+    const flags = rows.map(r=>r.flag || '');
 
     chart.clear();
     chart.setOption({
@@ -394,9 +412,12 @@
         formatter: (params)=>{
           const p = params && params[0];
           if(!p) return '';
-          const recHere = recs[p.dataIndex];
-          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}`;
-          return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>${recTxt}`;
+          const idx = p.dataIndex;
+          const flagSuf = flags[idx] ? String(flags[idx]) : '';
+          const recHere = recs[idx];
+          const pctTxt = `${nf1.format(+p.value)}%${flagSuf}`;                 // % + flag
+          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}${flagSuf}`; // recuento + flag
+          return `${p.axisValueLabel}<br><b>${pctTxt}</b>${recTxt}`;
         }
       },
       title: { left: 'center', top: 10, text: `Pob. con Cl residual ≥0.5 mg/L — ${ambForRegions} — ${year}` },
@@ -407,7 +428,7 @@
         type: 'bar',
         data: y,
         itemStyle: { color: color },
-        label: { show:true, position:'top', formatter:(p)=>`${nf1.format(+p.value)}%` }
+        label: { show:true, position:'top', formatter:(p)=>`${nf1.format(+p.value)}%` } // ← sin flag en etiqueta
       }],
       animation: true,
       animationDuration: 900,
@@ -452,4 +473,5 @@
 </script>
 </body>
 </html>
+
 
