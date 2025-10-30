@@ -28,12 +28,11 @@
 (function(){
   const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
   const TARGET_TABLE_NAME = "tb_indicadores_serie";
-  const INDICADOR_ID = "Ind_19";            // ← indicador de alcantarillado/DSE
+  const INDICADOR_ID = "Ind_19";            // indicador de alcantarillado/DSE
   const D_VALORES = "CON ACCESO";
   const REGION_TOTAL = "NACIONAL";
 
   const nf1 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const nf0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
 
   // ==== util colores
   const BASE_HEX = "#2F4858";
@@ -47,11 +46,12 @@
   const baseHSL = hexToHsl(BASE_HEX);
   const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
   const normalizeAmb = (s)=> String(s||'').trim().toUpperCase();
+  const cleanFlag = (v)=> {
+    const t = String(v==null?'':v).trim();
+    return t ? t : '';
+  };
 
   // ==== formato de valor_recuento (LOS VALORES VIENEN EN MILES)
-  // Mostrar SIEMPRE 1 decimal y el sufijo correcto:
-  // - Si >= 1,000 (miles) → mostrar en "millones" (miles/1000).
-  // - Si < 1,000 (miles)  → mostrar en "mil".
   function formatRecuento(vThousands){
     if(vThousands==null || isNaN(vThousands)) return '';
     const n = Number(vThousands);
@@ -121,25 +121,27 @@
     grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
     legend: {
       top: 12, left: 'center', itemWidth: 18, itemHeight: 10, icon: 'roundRect', textStyle: { fontSize: 12 },
-      // Mostrar "TOTAL" si la serie viene como "NACIONAL"
       formatter: (name)=> (String(name).toUpperCase()==="NACIONAL" ? "TOTAL" : name)
     },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
-      // aquí agregamos el recuento formateado
       formatter: (params)=>{
         const opt = chart.getOption();
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
         (params||[]).forEach(p=>{
-          const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%`;
-          const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
           const serOpt = opt.series[p.seriesIndex] || {};
           const recMap = serOpt._recByYear || {};
+          const flagMap = serOpt._flagByYear || {};
           const rec = recMap[String(year)];
-          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}`;
-          lines.push(`${p.marker} ${displayName}: <b>${v}</b>${recTxt}`);
+          const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
+          const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
+
+          const vTxt = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%${flagSuf}`;
+          const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}${flagSuf}`;
+
+          lines.push(`${p.marker} ${displayName}: <b>${vTxt}</b>${recTxt}`);
         });
         return lines.join('<br/>');
       }
@@ -174,23 +176,28 @@
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
       dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
-      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"])
+      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← campo del flag
     };
-    if(Object.values(fields).some(v=>!v)) throw new Error("Campos requeridos no hallados.");
+    if(!fields.anio || !fields.ambito || !fields.valor || !fields.region || !fields.ind || !fields.dvals){
+      throw new Error("Campos requeridos no hallados.");
+    }
   }
 
   // ========= Línea (series por ámbito) =========
   async function loadLine(){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
     const where =
       `UPPER(${region})='${REGION_TOTAL}' AND ` +
       `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
       `UPPER(${dvals})=UPPER('${D_VALORES}')`;
 
+    const outFields = [anio,ambito,valor,rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [anio,ambito,valor,rec].join(","),
+      outFields,
       orderByFields: `${anio} ASC, ${ambito} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -205,7 +212,8 @@
         anio: Number(r[anio]),
         ambito: normalizeAmb(r[ambito]),
         valor: Number(r[valor]),
-        recuento: (r[rec]!=null ? Number(r[rec]) : null)
+        recuento: (r[rec]!=null ? Number(r[rec]) : null),
+        flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
     // posible escala 0-1 → %
@@ -213,18 +221,19 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación por (ambito, anio): promedio de %, suma de recuento
+    // agregación por (ambito, anio): promedio de %, suma de recuento y union de flags
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
-      const cur = agg.get(key) || { sum:0, count:0, rec:0 };
+      const cur = agg.get(key) || { sum:0, count:0, rec:0, flags:new Set() };
       cur.sum += r.valor; cur.count += 1;
       if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
+      if(r.flag) cur.flags.add(r.flag);
       agg.set(key, cur);
     });
     const rows = Array.from(agg.entries()).map(([key, o])=>{
       const [amb, an] = key.split("|");
-      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec };
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec, flag: Array.from(o.flags).join('') };
     });
 
     const years = Array.from(new Set(rows.map(r=>r.anio))).sort((a,b)=>a-b).map(String);
@@ -235,12 +244,13 @@
     Object.entries(byAmb).forEach(([ambito, arr])=>{
       const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
       const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento]));
+      const mFlg = new Map(arr.map(o=>[String(o.anio), o.flag]));
       const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
       const valid = data.filter(v=>v!=null);
       const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      const recByYear = {};
-      years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
-      seriesPrep.push({ name: ambito, data, mean, recByYear });
+      const recByYear = {}; years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      const flagByYear= {}; years.forEach(y=>{ const fv = mFlg.get(y); if(fv) flagByYear[y] = fv; });
+      seriesPrep.push({ name: ambito, data, mean, recByYear, flagByYear });
     });
 
     // Mantener ORDEN de botones en la leyenda: TOTAL, URBANO, RURAL
@@ -279,7 +289,8 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear   // ← mapa año -> recuento para tooltip
+        _recByYear: s.recByYear,   // para tooltip
+        _flagByYear: s.flagByYear  // para tooltip
       };
     });
 
@@ -309,7 +320,7 @@
       graphic: []
     });
 
-    // labels tras animación
+    // labels tras animación (sin flag, solo tooltip)
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -344,7 +355,7 @@
 
   // ========= Barras (DRILLDOWN por regiones) =========
   async function loadBars({year, amb, color}){
-    const {anio, ambito, valor, region, ind, dvals, rec} = fields;
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
@@ -353,9 +364,11 @@
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `UPPER(${ambito}) LIKE '%${amb}%'`;
 
+    const outFields = [region,valor,ambito,rec].concat(flag?[flag]:[]).join(",");
+
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [region,valor,ambito,rec].join(","),
+      outFields,
       orderByFields: `${region} ASC`,
       returnGeometry: "false",
       f: "json"
@@ -364,26 +377,29 @@
     const features = (res.data && res.data.features) || [];
     if(!features.length) throw new Error(`Sin datos para ${amb} en ${year}.`);
 
-    // puede haber varios registros por región → promedio de % y suma de recuento
+    // puede haber varios registros por región → promedio de % y suma de recuento + unión de flags
     const tmp = new Map();
     features.forEach(f=>{
       const r = f.attributes;
       const reg = String(r[region]);
       const v   = Number(r[valor]);
       const rc  = (r[rec]!=null ? Number(r[rec]) : null);
-      const it = tmp.get(reg) || { sum:0, c:0, rec:0 };
+      const flg = flag ? cleanFlag(r[flag]) : '';
+      const it = tmp.get(reg) || { sum:0, c:0, rec:0, flags:new Set() };
       it.sum += v; it.c += 1;
       if(rc!=null && !isNaN(rc)) it.rec += rc;
+      if(flg) it.flags.add(flg);
       tmp.set(reg, it);
     });
 
     let rows = Array.from(tmp.entries()).map(([reg, o])=>({
       region: reg,
       valor: o.sum / o.c,
-      recuento: o.rec
+      recuento: o.rec,
+      flag: Array.from(o.flags).join('')
     }));
 
-    // escala %
+    // escala % si viniera en 0-1
     const maxRaw = Math.max(...rows.map(r=>r.valor));
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     rows.forEach(r => r.valor = r.valor * scale);
@@ -391,7 +407,8 @@
 
     const x = rows.map(r=>r.region);
     const y = rows.map(r=>r.valor);
-    const recs = rows.map(r=>r.recuento);
+    const recs  = rows.map(r=>r.recuento);
+    const flags = rows.map(r=>r.flag||'');
 
     chart.clear();
     chart.setOption({
@@ -404,9 +421,12 @@
         formatter: (params)=>{
           const p = params && params[0];
           if(!p) return '';
-          const recHere = recs[p.dataIndex];
-          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}`;
-          return `${p.axisValueLabel}<br><b>${nf1.format(+p.value)}%</b>${recTxt}`;
+          const idx = p.dataIndex;
+          const flagSuf = flags[idx] ? String(flags[idx]) : '';
+          const recHere = recs[idx];
+          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}${flagSuf}`;
+          const vTxt = `${nf1.format(+p.value)}%${flagSuf}`;
+          return `${p.axisValueLabel}<br><b>${vTxt}</b>${recTxt}`;
         }
       },
       title: { left: 'center', top: 10, text: `Acceso a alcantarillado/DSE — ${amb} — ${year}` },
