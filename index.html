@@ -61,7 +61,6 @@
     background:var(--panel); color:var(--fg); font-weight:900; box-shadow:var(--shadow); }
   h1{margin:0; font-size:clamp(18px,2.2vw,24px)}
   .muted{color:var(--muted); font-size:12px}
-
   .tools{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
   .search{ position:relative; }
   .search input{
@@ -100,11 +99,9 @@
   .g-meta{ font-size:12px; color:var(--muted); }
 
   /* Región de contenido con scroll interno estable */
-  .g-content{
-    max-height:70vh; overflow:auto; padding:14px;
-  }
+  .g-content{ max-height:70vh; overflow:auto; padding:14px; }
 
-  /* ===== GRID de “producto” ===== */
+  /* ===== GRID ===== */
   .grid{
     display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px;
   }
@@ -125,6 +122,7 @@
   }
   .thumb .thumb-blank{
     position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:12px;
+    transition: opacity .2s ease;
   }
   .thumb iframe{
     position:absolute; top:0; left:0;
@@ -150,7 +148,7 @@
   .btn-link{ padding:0 12px; font-weight:700; text-decoration:none; flex:1; }
   .icon-btn{ width:40px; cursor:pointer; }
 
-  /* ===== PREVIEW (Quick look) ===== */
+  /* ===== PREVIEW ===== */
   .preview{
     position:fixed; width:520px; height:360px; display:none; z-index:60;
     border:1px solid var(--border); background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden;
@@ -227,19 +225,41 @@
 
     <!-- Fuente oculta (tu lista) -->
     <ul id="links" style="display:none">
-      <li><a href="burbujas-3.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo" data-tags="burbujas, timeline, saneamiento">burbujas-3</a></li>
+<li><a href="burbujas-3.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo" data-tags="burbujas, timeline, saneamiento">burbujas-3</a></li>
       <li><a href="Burbujas-Inversiones-MEF.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo-Avance-PIM" data-tags="burbujas, timeline, inversiones">burbujas-inversiones </a></li>
       <li><a href="Serie-Inversiones-NG.html" target="_blank" data-desc="Inversiones PIM por nivel de gobierno Saneamiento" data-tags="serie, timeline, saneamiento">Inversiones PIM Saneamiento por Nivel de Gobierno</a></li>
       <li><a href="Serie-Inversiones-Total.html" target="_blank" data-desc="Inversiones PIM Total Saneamiento" data-tags="serie, timeline, saneamiento">Inversiones PIM Saneamiento por Nacional total</a></li>
       <li><a href="Grafico-burbujas-continuidad.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo-continuidad" data-tags="burbujas, timeline, saneamiento">burbujas-continuidad</a></li>
       <li><a href="Grafico-burbujas-Alc-cloroR.html" target="_blank" data-desc="Burbujas dinámicas en el tiempo-continuidad-Alc-cloroR" data-tags="burbujas, timeline, saneamiento">burbujas-continuidad-Alc-CloroR</a></li>
       <li><a href="Grafico-burbujas-BD-SAN.html" target="_blank" data-desc="GRAFICO BB-BD-SAN" data-tags="Burbujas,">Grafico Burubujas SAN-BD</a></li>
-      <li><a href="Grafico-burbujas-BD-SAN-ENAPRES.html" target="_blank" data-desc="GRAFICO BB-BD-SAN-ENAPRES" data-tags="Burbujas, ENAPRES">Grafico Burubujas SAN-BD-ENAPRES</a></li>
-      <li><a href="Grafico-burbujas-BD-SAN-ENAPRES-FLTR.html" target="_blank" data-desc="GRAFICO BB-BD-SAN-ENAPRES-Filtro" data-tags="Burbujas, ENAPRES">Grafico Burubujas SAN-BD-ENAPRES-Filtro</a></li>
-      <li><a href="serie-Porcentaje-AccesoAP-ENAPRES.html" target="_blank" data-desc="serie %Acceso a AP" data-tags="series, ENAPRES, vivienda">serie %Acceso a AP-ENAPRES</a></li>
+      <li><a href="Grafico-burbujas-BD-SAN-ENAPRES.html" target="_blank" data-desc="GRAFICO BB-BD-SAN-ENAPRES" data-tags="Burbujas,">Grafico Burubujas SAN-BD-ENAPRES</a></li>
+      <li><a href="Grafico-burbujas-BD-SAN-ENAPRES-FLTR.html" target="_blank" data-desc="GRAFICO BB-BD-SAN-ENAPRES-Filtro" data-tags="Burbujas,">Grafico Burubujas SAN-BD-ENAPRES-Filtro</a></li>
+      <li><a href="serie-Porcentaje-AccesoAP.html" target="_blank" data-desc="serie %Acceso a AP" data-tags="series, déficit, vivienda, ENAHO">serie %Acceso a AP</a></li>
+      <li><a href="serie-Porcentaje-AccesoAP-ENAPRES.html" target="_blank" data-desc="serie %Acceso a AP" data-tags="series, déficit, vivienda, ENAPRES">serie %Acceso a AP-ENAPRES</a></li>
+      <li><a href="serie-Porcentaje-AccesoALC.html" target="_blank" data-desc="serie %Acceso a ALC" data-tags="series, déficit, ENAHO, alcantarillado">serie %Acceso a ALC</a></li>
       <li><a href="serie-Porcentaje-AccesoALC-ENAPRES.html" target="_blank" data-desc="serie %Acceso a ALC" data-tags="series, ENAPRES, alcantarillado ">serie %Acceso a ALC-ENAPRES</a></li>
-      <li><a href="serie-Continuidad-horas-ENAPRES.html" target="_blank" data-desc="serie Continuidad (h)" data-tags="series, continuidad, ENAPRES">serie Continuidad en horas-ENAPRES</a></li>
-      <li><a href="mapa-creditos-fmv.html" target="_blank" data-desc="Mapa total de creditos FMV" data-tags="mapa, creditos, FMV, Fondo">MAPA TOTAL CREDITOS FM</a></li>
+      <li><a href="serie-Porcentaje-PobenHogcCl.html" target="_blank" data-desc="serie %Pob en Hogares con acceso a Cl adecuado" data-tags="series, déficit, vivienda">serie %Pob en Hogares con acceso a Cl adecuado</a></li>
+      <li><a href="serie-Porcentaje-PobenHogcCl-ENAPRES.html" target="_blank" data-desc="serie %Pob en Hogares con acceso a Cl adecuado-ENAPRES" data-tags="series, saneamiento, cloro, ENAPRES">serie %Pob en Hogares con acceso a Cl adecuado-ENAPRES</a></li>
+      <li><a href="serie-Porcentaje-Continuidad-20-24h.html" target="_blank" data-desc="serie %Continuidad 20-24h" data-tags="series, déficit, vivienda">serie %Continuidad 20-24h</a></li>
+      <li><a href="serie-Continuidad-horas-ENAPRES.html" target="_blank" data-desc="serie Continuidad (h) " data-tags="series, continuidad, ENAPRES">serie Continuidad en horas-ENAPRES</a></li>
+      <li><a href="serie-Porcentaje-PobContinuidad20y24-ENAPRES.html" target="_blank" data-desc="serie %Continuidad 20-24h-ENAPRES" data-tags="series, saneamiento, ENAPRES">serie %Pob Continuidad 20 y 24h-ENAPRES</a></li>
+      <li><a href="serie-Porcentaje-Hogxpersona-recoge-agua-ENAPRES.html" target="_blank" data-desc="serie-Porcentaje-Hogxpersona-recoge-agua-ENAPRES" data-tags="series, saneamiento, ENAPRES">sere-Porcentaje de hogares x quien recoge agua-ENAPRES</a></li>
+      <li><a href="serie-defhab-4.html" target="_blank" data-desc="Variación por años, versión 4" data-tags="series, déficit, vivienda">series deficit nacional%4</a></li>
+      <li><a href="serie_recuentohab_cuali_cuanti.html" target="_blank" data-desc="Variación por años, " data-tags="series, déficit, vivienda">series deficit totales habitacional cuali cuanti</a></li>
+      <li><a href="serie-habitacional-total-cuali-cuanti-porcent.html" target="_blank" data-desc="Variación por años, " data-tags="series, déficit, vivienda">series deficit totales habitacional cuali cuanti-porcentaje</a></li>
+      <li><a href="serie-defhababs-1.html" target="_blank" data-desc="Déficit habitacional (valores absolutos)" data-tags="series, absolutos, vivienda">series deficit nacional(abs)1</a></li>
+      <li><a href="serie-defcuanti-enaho-1.html" target="_blank" data-desc="Déficit cuantitativo (ENAHO)" data-tags="enaho, cuantitativo, vivienda">series deficit nacional cuanti 1</a></li>
+      <li><a href="serie-defcuali-enaho-1.html" target="_blank" data-desc="Déficit cualitativo (ENAHO)" data-tags="enaho, cualitativo, vivienda">series deficit nacional cuali 1</a></li>
+      <li><a href="Deficit_x_area_residencia.html" target="_blank" data-desc="Déficit habitacional por área de residencia" data-tags="Déficit, residencia, rural, urbano, vivienda">Déficit habitacional por área de residencia</a></li>
+      <li><a href="Deficit_cuanti_x_area_residencia.html" target="_blank" data-desc="Déficit cuantitativo por área de residencia" data-tags="Déficit, cuantitativo, residencia, rural, urbano, vivienda">Déficit cuantitativo por área de residencia</a></li>
+      <li><a href="Deficit_cuali_x_area_residencia.html" target="_blank" data-desc="Déficit cualitativo por área de residencia" data-tags="Déficit, cualitativo, residencia, rural, urbano, vivienda">Déficit cualitativo por área de residencia</a></li>
+      <li><a href="serie-creditosFMVtotal.html" target="_blank" data-desc="Total Créditos FMV" data-tags="Créditos, FMV, Fondo,">Total Creditos FMV</a></li>
+      <li><a href="serie-BBP-INT-SOST.html" target="_blank" data-desc="Total Bonos FMV" data-tags="Bonos, FMV, Fondo,">BONOS FMV</a></li>
+      <li><a href="serie-unit-bbp.html" target="_blank" data-desc="Total Bonos FMV Unit" data-tags="Bonos, FMV, Fondo,">BONOS FMV BBP UNIT</a></li>
+      <li><a href="serie-unit-bbp-sost.html" target="_blank" data-desc="Total Bonos FMV Unit" data-tags="Bonos, FMV, Fondo,">BONOS FMV BBP SOST UNIT</a></li>
+      <li><a href="serie-unit-bbp-int.html" target="_blank" data-desc="Total Bonos FMV Unit" data-tags="Bonos, FMV, Fondo,">BONOS FMV BBP INT UNIT</a></li>
+      <li><a href="serie-bonos-techo-propio-total.html" target="_blank" data-desc="Total Bonos Techo Propio" data-tags="Bonos, techo propio, Fondo,">BONOS TECHO PROPIO TOTAL</a></li>
+      <li><a href="mapa-creditos-fmv.html" target="_blank" data-desc="Mapa total de creditos FMV" data-tags="creditos, FMV, Fondo,">MAPA TOTAL CREDITOS FM</a></li>
     </ul>
   </div>
 
@@ -284,7 +304,7 @@
   function copyIcon(){return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>`;}
   function codeIcon(){return `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 17l-5-5 5-5M16 7l5 5-5 5M13 6l-2 12"/></svg>`;}
 
-  /* ===== AGRUPACIÓN (simple) ===== */
+  /* ===== AGRUPACIÓN ===== */
   const GROUP_RULES={ ENAPRES:['enapres'], MAPA:['mapa'], OTROS:[] };
   function normalize(it){return (it.text+' '+it.href+' '+it.desc+' '+it.tags.join(' ')).toLowerCase();}
   function categorize(it){
@@ -294,7 +314,6 @@
   }
 
   /* ===== MINIATURA helpers ===== */
-  // Escala el iframe 1200x675 para encajar en el width real del contenedor .thumb
   function sizeThumb(thumb){
     const frame = thumb.querySelector('iframe');
     if(!frame) return;
@@ -302,7 +321,6 @@
     const scale = w / 1200; // 1200x675 base
     frame.style.transform = `scale(${scale})`;
   }
-  // Crea la miniatura (con lazy load)
   function makeThumb(href){
     const t = document.createElement('div');
     t.className = 'thumb';
@@ -310,20 +328,39 @@
     t.innerHTML = `<div class="thumb-blank">Cargando miniatura…</div>`;
     return t;
   }
-  // Carga el iframe solo cuando sea necesario
+  // *** IMPORTANTE: versión con allow-scripts + allow-same-origin ***
   function loadThumb(thumb){
     if(thumb.dataset.loaded) return;
     const href = thumb.dataset.href;
     const iframe = document.createElement('iframe');
     iframe.referrerPolicy = 'no-referrer';
-    iframe.sandbox = ''; // más seguro; si tu HTML necesita scripts, elimina esta línea
-    iframe.addEventListener('load',()=>{ sizeThumb(thumb); thumb.querySelector('.thumb-blank').style.display='none'; });
-    iframe.addEventListener('error',()=>{ thumb.classList.add('error'); thumb.querySelector('.thumb-blank').textContent='Miniatura no disponible'; });
-    // Intento de carga
+    iframe.sandbox = 'allow-scripts allow-same-origin';
+    iframe.loading = 'lazy';
+
+    const fallback = thumb.querySelector('.thumb-blank');
+    let sized = false;
+
+    iframe.addEventListener('load', ()=>{
+      try{
+        const doc = iframe.contentDocument;
+        const painted = doc && (doc.querySelector('canvas') || doc.querySelector('[class*=echart]'));
+        if(painted) fallback.style.opacity='0';
+        else fallback.style.opacity='0'; // quitamos loader igual tras load
+      }catch(_){
+        fallback.style.opacity='0';
+      }
+      if(!sized){ sizeThumb(thumb); sized = true; }
+      setTimeout(()=>{ fallback.style.display='none'; }, 200);
+    });
+
+    iframe.addEventListener('error', ()=>{
+      thumb.classList.add('error');
+      fallback.textContent = 'Miniatura no disponible';
+    });
+
     iframe.src = href;
     thumb.appendChild(iframe);
     thumb.dataset.loaded = '1';
-    // Primer ajuste de escala
     sizeThumb(thumb);
   }
 
@@ -332,7 +369,7 @@
     const el=document.createElement('article');
     el.className='card'; el.tabIndex=0; el.dataset.index=idx;
 
-    const thumb = makeThumb(it.href); // MINIATURA
+    const thumb = makeThumb(it.href);
     el.appendChild(thumb);
 
     el.insertAdjacentHTML('beforeend', `
@@ -350,15 +387,12 @@
       </div>
     `);
 
-    // Botones
     el.querySelector('.peek').addEventListener('click', (e)=>{ e.stopPropagation(); quickLook(it, el); });
     el.querySelector('.copy').addEventListener('click', ()=> copyLink(it.href));
     el.querySelector('.embed').addEventListener('click', ()=> copyIframe(it.href));
     el.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ window.open(it.href,'_blank','noopener'); } });
 
-    // Registrar miniatura para lazy load
     observeThumb(thumb);
-
     return el;
   }
 
@@ -396,7 +430,6 @@
       rows.forEach(({it,i})=> grid.appendChild(makeCard(it,i)));
       groupsEl.appendChild(d);
 
-      // Cuando se expanda el fichero, fuerza a cargar/ajustar miniaturas visibles
       d.addEventListener('toggle', ()=>{
         if(d.open){
           document.querySelectorAll('.thumb').forEach(sizeThumb);
@@ -405,7 +438,7 @@
     }
   }
 
-  /* ===== PREVIEW flotante ===== */
+  /* PREVIEW */
   function positionPreviewByEl(el){
     const pad=16, w=520, h=360;
     const r=el.getBoundingClientRect();
@@ -436,7 +469,7 @@
   pvFrame.addEventListener('error', ()=> preview.classList.add('error'));
   pvFrame.addEventListener('load', ()=>{ try{ const ok=pvFrame.contentDocument && pvFrame.contentDocument.body && pvFrame.contentDocument.body.innerHTML.trim()!==''; preview.classList.toggle('error', !ok); if(!ok) pvFallback.textContent='Este archivo no permite vista previa embebida.'; }catch(_){ preview.classList.add('error'); pvFallback.textContent='Este archivo no permite vista previa embebida.'; } });
 
-  /* ===== COPY & SEARCH ===== */
+  /* COPY & SEARCH */
   async function copyLink(href){
     try{ await navigator.clipboard.writeText(new URL(href, location.href).toString()); ping('Enlace copiado'); }
     catch{ ping('No se pudo copiar'); }
@@ -453,7 +486,7 @@
   }
   qEl.addEventListener('input', ()=> render(items));
 
-  /* ===== OBSERVERS para miniaturas (lazy) ===== */
+  /* OBSERVERS para miniaturas (lazy) */
   const thumbIO = new IntersectionObserver((entries)=>{
     for(const e of entries){
       if(e.isIntersecting){
@@ -465,7 +498,6 @@
 
   function observeThumb(el){ thumbIO.observe(el); }
 
-  // Reajustar escalas tras resize
   window.addEventListener('resize', ()=>{
     document.querySelectorAll('.thumb').forEach(sizeThumb);
   });
@@ -475,5 +507,4 @@
 </script>
 </body>
 </html>
-
 
