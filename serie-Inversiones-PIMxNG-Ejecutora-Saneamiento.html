@@ -18,7 +18,7 @@
 </head>
 <body>
 <div id="wrap">
-  <h1>Monto PIM en millones por nivel de gobierno</h1>
+  <h1 id="topTitle">Monto PIM en millones por nivel de gobierno</h1>
   <p class="sub">Fuente: MEF- Consulta amigable</p>
   <div id="chart"><div id="loading">Cargando datos…</div></div>
   <div id="err"></div>
@@ -33,17 +33,19 @@
 
   // ========= Campos =========
   const F = {
-    anio: "ano_eje",
+    anio : "ano_eje",
     nivel: "nivel_gobierno_nombre",
     monto: "monto_pim",
-    dpto: "departamento_ejecutora_nombre"
+    dpto : "departamento_ejecutora_nombre",
+    prov : "provincia_ejecutora_nombre",
+    dist : "distrito_ejecutora_nombre"
   };
 
   // ========= Formatos =========
-  const nf1 = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const nf2cur = new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nf1   = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const nf2cur= new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Ejes: S/ 1 decimal + sufijo mil/mill (se mantiene)
+  // Y-axis: S/ 1 decimal + sufijo mil/mill (solo en eje)
   function formatAxisShort(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -51,7 +53,7 @@
     if(abs >= 1_000)     return "S/ " + nf1.format(v/1_000) + " mil";
     return "S/ " + nf1.format(v);
   }
-  // Etiquetas de dato: misma escala que arriba, PERO sin sufijo
+  // Etiquetas de dato: misma escala, sin sufijo
   function formatLabelNoSuffix(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -94,9 +96,16 @@
   }
   const ORDER = ["NACIONAL","REGIONAL","LOCAL"];
 
-  // ========= Fetch helper =========
+  // ========= Helpers =========
   const $err = document.getElementById('err');
   const $loading = document.getElementById('loading');
+  const $top = document.getElementById('topTitle');
+  const BASE_TITLE = "Monto PIM en millones por nivel de gobierno";
+  const TITLE_DEPT = "Monto PIM en millones por nivel de gobierno según departamento ejecutora";
+  const TITLE_PROV = "Monto PIM en millones por nivel de gobierno según provincia ejecutora";
+  const TITLE_DIST = "Monto PIM en millones por nivel de gobierno según distrito ejecutora";
+  function setTopTitle(t){ $top.textContent = t; }
+
   function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
   async function getJSON(url, params={}, timeoutMs=25000){
     const u = qs(url, params);
@@ -113,6 +122,7 @@
     if(data.error) throw new Error((data.error && data.error.message) || "Error en respuesta del servicio");
     return { data, url: u };
   }
+  function esc(v){ return String(v).replace(/'/g,"''"); }
 
   // ========= ECharts base =========
   const chart = echarts.init(document.getElementById('chart'));
@@ -124,7 +134,6 @@
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
-      // Tooltips: 2 decimales, sin sufijos
       formatter: (params)=>{
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
@@ -156,13 +165,11 @@
     }];
   }
 
-  // ========= Serie (líneas) con agregación en servidor =========
+  // ========= Serie (líneas) =========
   async function loadLine(){
-    const outStats = JSON.stringify([{
-      "statisticType":"sum",
-      "onStatisticField": F.monto,
-      "outStatisticFieldName":"sum_pim"
-    }]);
+    setTopTitle(BASE_TITLE);
+
+    const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField: F.monto, outStatisticFieldName:"sum_pim" }]);
 
     const res = await getJSON(tableUrl + "/query", {
       where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL)`,
@@ -178,7 +185,7 @@
     const features = (res.data && res.data.features) || [];
     if(!features.length) throw new Error("La consulta no devolvió filas.");
 
-    const agg = new Map(); // key: "NIVEL|AÑO" -> SUM(monto)
+    const agg = new Map();
     const yearsSet = new Set();
     features.forEach(f=>{
       const a = Number(f.attributes[F.anio]);
@@ -192,7 +199,6 @@
 
     const years = Array.from(yearsSet).sort((a,b)=>a-b).map(String);
 
-    const ORDER = ["NACIONAL","REGIONAL","LOCAL"];
     const seriesPrep = ORDER.map(name=>{
       const data = years.map(y => (agg.has(name+"|"+y) ? +agg.get(name+"|"+y) : null));
       const valid = data.filter(v=>v!=null);
@@ -200,8 +206,6 @@
       return { name, data, mean };
     }).filter(s => s.data.some(v=>v!=null));
 
-    // Colores
-    const baseHSL = hexToHsl("#2F4858");
     const n = Math.max(1, seriesPrep.length);
     const minL = Math.max(18, baseHSL.l - 12);
     const maxL = Math.min(85, baseHSL.l + 26);
@@ -240,7 +244,6 @@
       graphic: []
     });
 
-    // Etiquetas en línea: S/ con 1 decimal, sin sufijo
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -256,30 +259,36 @@
       });
     });
 
-    // Drilldown por click
     chart.off('click');
     chart.on('click', (ev)=>{
       if(ev.componentType==='series' && ev.seriesType==='line'){
         const year = String(ev.name);
         const nivelDisplay = ev.seriesName;
         const color = chart.getOption().series[ev.seriesIndex]._color || '#3b82f6';
-        loadBars({year, nivelDisplay, color}).catch(showErr);
+        drillStack = [];
+        loadBarsDept({year, nivelDisplay, color}).catch(showErr);
       }
     });
   }
 
-  // ========= Barras (drilldown) con agregación en servidor =========
-  async function loadBars({year, nivelDisplay, color}){
-    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+  // ========= Pila navegación =========
+  let drillStack = [];
+  function pushBack(fn){ drillStack.push(fn); }
+  async function goBack(){
+    if(!drillStack.length){ await loadLine(); return; }
+    const fn = drillStack.pop();
+    await fn();
+  }
 
-    const outStats = JSON.stringify([{
-      "statisticType":"sum",
-      "onStatisticField": F.monto,
-      "outStatisticFieldName":"sum_pim"
-    }]);
+  // ========= Barras: Departamento =========
+  async function loadBarsDept({year, nivelDisplay, color}){
+    setTopTitle(TITLE_DEPT);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_pim" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${nivelOriginal}') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
+      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
       groupByFieldsForStatistics: F.dpto,
       outStatistics: outStats,
       orderByFields: `sum_pim DESC`,
@@ -292,54 +301,196 @@
     const features = (res.data && res.data.features) || [];
     if(!features.length) throw new Error(`Sin datos para ${nivelDisplay} en ${year}.`);
 
-    let rows = features.map(f=>({
-      dep: String(f.attributes[F.dpto]),
-      val: Number(f.attributes["sum_pim"])
-    })).filter(r=>r.dep && isFinite(r.val));
+    let rows = features.map(f=>({ name:String(f.attributes[F.dpto]), val:Number(f.attributes.sum_pim) }))
+                       .filter(r=>r.name && isFinite(r.val))
+                       .sort((a,b)=>b.val-a.val);
 
-    rows.sort((a,b)=>b.val-a.val);
-
-    const x = rows.map(r=>r.dep);
+    const x = rows.map(r=>r.name);
     const y = rows.map(r=>r.val);
 
     chart.clear();
     chart.setOption({
-      backgroundColor: '#ffffff',
-      grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
-      legend: { show:false },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type:'shadow' },
-        // Tooltips barras: 2 decimales, sin sufijos
-        formatter: (params)=>{
-          const p = params && params[0];
-          if(!p) return '';
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0]; if(!p) return '';
           const full = nf2cur.format(+p.value);
           return `${p.axisValueLabel}<br><b>${full}</b>`;
         }
       },
-      title: { left: 'center', top: 10, text: `Pim — ${nivelDisplay} — ${year}` },
-      xAxis: { type:'category', data: x, axisLabel:{ interval:0, rotate: (x.length>18?40:(x.length>12?25:0)) } }, // sin nombre
-      yAxis: { type:'value', name:'Pim (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
-      series: [{
-        name: 'Departamento',
-        type: 'bar',
-        data: y,
-        itemStyle: { color: color },
-        // Etiquetas barras: S/ con 1 decimal, sin sufijo
-        label: { show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) }
+      title:{ left:'center', top:10, text:`Pim — ${nivelDisplay} — ${year}` },
+      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      yAxis:{ type:'value', name:'Pim (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[{
+        name:'Departamento',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) }
       }],
-      animation: true,
-      animationDuration: 1200,
-      graphic: backGraphic(color, async ()=>{ try{ await loadLine(); }catch(e){ showErr(e); } })
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
     });
 
-    document.onkeydown = async (e)=>{
-      if(e.key === 'Escape'){
-        document.onkeydown = null;
-        await loadLine().catch(showErr);
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        const dep = ev.name;
+        pushBack(()=>loadBarsDept({year, nivelDisplay, color}));
+        loadBarsProv({year, nivelDisplay, dep, color}).catch(showErr);
       }
-    };
+    });
+
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+  }
+
+  // ========= Barras: Provincia =========
+  async function loadBarsProv({year, nivelDisplay, dep, color}){
+    setTopTitle(TITLE_PROV);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_pim" }]);
+
+    const where =
+      `${F.anio}=${Number(year)} AND ` +
+      `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `${F.monto} IS NOT NULL AND ${F.prov} IS NOT NULL AND ` +
+      `UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: F.prov,
+      outStatistics: outStats,
+      orderByFields: `sum_pim DESC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${dep} — ${nivelDisplay} en ${year}.`);
+
+    let rows = features.map(f=>({ name:String(f.attributes[F.prov]), val:Number(f.attributes.sum_pim) }))
+                       .filter(r=>r.name && isFinite(r.val))
+                       .sort((a,b)=>b.val-a.val);
+
+    const x = rows.map(r=>r.name);
+    const y = rows.map(r=>r.val);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0]; if(!p) return '';
+          const full = nf2cur.format(+p.value);
+          return `${p.axisValueLabel}<br><b>${full}</b>`;
+        }
+      },
+      title:{ left:'center', top:10, text:`Pim — ${nivelDisplay} — ${year} — ${dep}` },
+      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      yAxis:{ type:'value', name:'Pim (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[{
+        name:'Provincia',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) }
+      }],
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        const prov = ev.name;
+        pushBack(()=>loadBarsProv({year, nivelDisplay, dep, color}));
+        loadBarsDist({year, nivelDisplay, dep, prov, color}).catch(showErr);
+      }
+    });
+
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+  }
+
+  // ========= Barras: Distrito =========
+  async function loadBarsDist({year, nivelDisplay, dep, prov, color}){
+    setTopTitle(TITLE_DIST);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_pim" }]);
+
+    const where =
+      `${F.anio}=${Number(year)} AND ` +
+      `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `${F.monto} IS NOT NULL AND ${F.dist} IS NOT NULL AND ` +
+      `UPPER(${F.dpto})=UPPER('${esc(dep)}') AND ` +
+      `UPPER(${F.prov})=UPPER('${esc(prov)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: F.dist,
+      outStatistics: outStats,
+      orderByFields: `sum_pim DESC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${prov} — ${dep} — ${nivelDisplay} en ${year}.`);
+
+    let rows = features.map(f=>({ name:String(f.attributes[F.dist]), val:Number(f.attributes.sum_pim) }))
+                       .filter(r=>r.name && isFinite(r.val))
+                       .sort((a,b)=>b.val-a.val);
+
+    const x = rows.map(r=>r.name);
+    const y = rows.map(r=>r.val);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0]; if(!p) return '';
+          const full = nf2cur.format(+p.value);
+          return `${p.axisValueLabel}<br><b>${full}</b>`;
+        }
+      },
+      title:{ left:'center', top:10, text:`Pim — ${nivelDisplay} — ${year} — ${dep} — ${prov}` },
+      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      yAxis:{ type:'value', name:'Pim (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[{
+        name:'Distrito',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) }
+      }],
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', ()=>{});
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
   }
 
   // ========= Flujo =========
