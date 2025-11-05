@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{ --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08); }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 6px;text-align:center}
+    .sub{color:var(--muted);font-size:12px;margin:0 0 14px;text-align:center}
+    #chart{height:70vh;min-height:460px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);position:relative}
+    #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones</h1>
+  <p class="sub">Fuente: MEF- Consulta amigable</p>
+  <div id="chart"><div id="loading">Cargando datos…</div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  const SERVICE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
+  const TABLE_ID = 15;
+  const tableUrl = SERVICE + "/" + TABLE_ID;
+
+  // Campos
+  const F = { anio:"ano_eje", pim:"monto_pim", dev:"monto_devengado", funcion:"funcion_nombre" };
+
+  const nf1    = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const nf2cur = new Intl.NumberFormat("es-PE", { style:"currency", currency:"PEN", minimumFractionDigits:2, maximumFractionDigits:2 });
+
+  function formatAxisShort(v){
+    if(v == null || isNaN(v)) return "";
+    const abs = Math.abs(v);
+    if(abs >= 1_000_000) return "S/ " + nf1.format(v/1_000_000) + " mill";
+    if(abs >= 1_000)     return "S/ " + nf1.format(v/1_000) + " mil";
+    return "S/ " + nf1.format(v);
+  }
+  function formatLabelNoSuffix(v){
+    if(v == null || isNaN(v)) return "";
+    const abs = Math.abs(v);
+    if(abs >= 1_000_000) return "S/ " + nf1.format(v/1_000_000);
+    if(abs >= 1_000)     return "S/ " + nf1.format(v/1_000);
+    return "S/ " + nf1.format(v);
+  }
+
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){
+    const m=hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b); let h,s,l=(max+min)/2;
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}
+      h/=6;
+    }
+    return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
+  }
+  const baseHSL = hexToHsl(BASE_HEX);
+  const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
+
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  async function getJSON(url, params={}, timeoutMs=25000){
+    const u = qs(url, params);
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    let res;
+    try{ res = await fetch(u, { signal: ctrl.signal, mode:'cors', credentials:'omit' }); }
+    finally{ clearTimeout(to); }
+    if(!res.ok) throw new Error(`HTTP ${res.status} al consultar ${u}`);
+    const data = await res.json();
+    if(data.error) throw new Error((data.error && data.error.message) || "Error en respuesta del servicio");
+    return { data, url: u };
+  }
+
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', ()=>chart.resize());
+
+  // Leyenda con “muestras de línea”
+  const ICON_SOLID  = 'path://M2,9 L26,9 L26,11 L2,11 Z';
+  const ICON_DASHED = 'path://M2,9 L8,9 L8,11 L2,11 Z M10,9 L16,9 L16,11 L10,11 Z M18,9 L24,9 L24,11 L18,11 Z';
+
+  const baseOption = {
+    backgroundColor:'#ffffff',
+    grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+    legend:{
+      top:12, left:'center',
+      itemWidth:26, itemHeight:10,
+      textStyle:{ fontSize:12 },
+      data:[
+        { name:'PIM',        icon: ICON_DASHED },
+        { name:'Devengado',  icon: ICON_SOLID  }
+      ]
+    },
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{ type:'line' },
+      formatter:(params)=>{
+        const year = params?.[0]?.axisValue ?? '';
+        const lines = [`<b>${year}</b>`];
+        (params||[]).forEach(p=>{
+          const full = nf2cur.format(+p.value);
+          lines.push(`${p.marker} ${p.seriesName}: <b>${full}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis:{ type:'category', boundaryGap:true, name:'Años', nameLocation:'middle', nameGap:34, axisTick:{alignWithLabel:true}, axisLabel:{margin:14}, animation:false, data:[] },
+    yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v), margin:12 }, splitLine:{show:true}, scale:true },
+    animation:true,
+    animationDuration:1600,
+    animationDurationUpdate:1600,
+    series:[]
+  };
+  chart.setOption(baseOption);
+
+  async function load(){
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.pim, outStatisticFieldName:"sum_pim" },
+      { statisticType:"sum", onStatisticField:F.dev, outStatisticFieldName:"sum_dev" }
+    ]);
+
+    // >>> Filtro por funcion_nombre = 'SANEAMIENTO'
+    const res = await getJSON(tableUrl + "/query", {
+      where: `(${F.anio} IS NOT NULL) AND (UPPER(${F.funcion})=UPPER('SANEAMIENTO')) AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL)`,
+      groupByFieldsForStatistics: F.anio,
+      outStatistics: outStats,
+      orderByFields: `${F.anio} ASC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error("La consulta no devolvió filas.");
+
+    const rows = features.map(f=>({
+      anio: Number(f.attributes[F.anio]),
+      pim : Number(f.attributes.sum_pim || 0),
+      dev : Number(f.attributes.sum_dev || 0)
+    })).filter(r => !isNaN(r.anio)).sort((a,b)=>a.anio-b.anio);
+
+    const years = rows.map(r=>String(r.anio));
+    const dataPim = rows.map(r=>r.pim);
+    const dataDev = rows.map(r=>r.dev);
+
+    const cPim = hsl(baseHSL.h, baseHSL.s, Math.min(85, baseHSL.l + 10));
+    const cDev = hsl(baseHSL.h, baseHSL.s, Math.max(18, baseHSL.l - 8));
+
+    const series = [
+      {
+        name:'PIM',
+        type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color:cPim, type:'dashed' },
+        itemStyle:{ color:cPim }, emphasis:{ focus:'series', scale:false }, clip:true,
+        data:dataPim
+      },
+      {
+        name:'Devengado',
+        type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color:cDev, type:'solid' },
+        itemStyle:{ color:cDev }, emphasis:{ focus:'series', scale:false }, clip:true,
+        data:dataDev
+      }
+    ];
+
+    const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const pad = Math.max((max - min) * 0.10, max*0.02);
+
+    chart.clear();
+    chart.setOption({
+      ...baseOption,
+      xAxis:{ ...baseOption.xAxis, data: years },
+      yAxis:{ ...baseOption.yAxis, min: Math.max(0, Math.floor(min - pad)), max: Math.ceil(max + pad) },
+      legend:{ ...baseOption.legend },
+      series
+    });
+
+    let labelsShown = false;
+    chart.off('finished');
+    chart.on('finished', ()=>{
+      if(labelsShown) return; labelsShown = true;
+      chart.setOption({
+        series: series.map(()=>({
+          label:{
+            show:true, position:'bottom', distance:4, fontSize:12, color:'#111827',
+            formatter:(p)=> (p.value==null||isNaN(p.value)) ? '' : formatLabelNoSuffix(+p.value)
+          },
+          labelLayout:{ hideOverlap: true }
+        }))
+      });
+    });
+  }
+
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  (async function run(){
+    try{
+      $loading.style.display = 'flex';
+      await load();
+      $loading.style.display = 'none';
+      $err.style.display = 'none';
+      $err.textContent = '';
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{ showErr(ev && ev.message ? ev.message : ev); }, true);
+})();
+</script>
+</body>
+</html>
