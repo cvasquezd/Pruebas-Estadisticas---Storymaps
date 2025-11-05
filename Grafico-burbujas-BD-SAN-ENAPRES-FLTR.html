@@ -120,6 +120,8 @@ const ID_COL = 'Ind_13';
 
 // Años
 const YEAR_START = 2011, YEAR_END = 2024;
+/* NUEVO: año inicial de la animación */
+const START_YEAR = 2024;
 
 const chart = echarts.init(document.getElementById('chart'));
 
@@ -334,7 +336,6 @@ function buildOptionsStruct(byYear){
           symbolSize:(val)=>sizeFn(val[2]),
           label:{
             show:true,
-            // (sin cambios) solo el nombre de la región
             formatter:(p)=>p.value[3],
             position:'right', fontSize:13, color:'#333'
           }
@@ -361,13 +362,17 @@ function buildOptionsStruct(byYear){
     });
   }
 
+  // índice inicial para START_YEAR (si no existe, usa 0)
+  const startIdx = Math.max(0, years.indexOf(START_YEAR));
+
   return {
     baseOption:{
       timeline:{
         axisType:'category', orient:'vertical', autoPlay:true, inverse:true,
         playInterval:2000, right:0, top:20, bottom:20, width:55, symbol:'none',
         checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false },
-        data: years
+        data: years,
+        currentIndex: startIdx   /* <-- arranca en START_YEAR */
       },
       title:[
         { text:'Evolución de Principales Indicadores de Saneamiento',
