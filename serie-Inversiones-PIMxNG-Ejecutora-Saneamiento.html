@@ -28,7 +28,7 @@
 (function(){
   // ========= Servicio / tabla =========
   const SERVICE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
-  const TABLE_ID = 15; // mv_mef_presupuesto_ejecucion_gasto_funcion_da_xproyecto
+  const TABLE_ID = 15;
   const tableUrl = SERVICE + "/" + TABLE_ID;
 
   // ========= Campos =========
@@ -38,14 +38,14 @@
     monto: "monto_pim",
     dpto : "departamento_ejecutora_nombre",
     prov : "provincia_ejecutora_nombre",
-    dist : "distrito_ejecutora_nombre"
+    dist : "distrito_ejecutora_nombre",
+    funcion: "funcion_nombre"
   };
 
   // ========= Formatos =========
   const nf1   = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const nf2cur= new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Y-axis: S/ 1 decimal + sufijo mil/mill (solo en eje)
   function formatAxisShort(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -53,7 +53,6 @@
     if(abs >= 1_000)     return "S/ " + nf1.format(v/1_000) + " mil";
     return "S/ " + nf1.format(v);
   }
-  // Etiquetas de dato: misma escala, sin sufijo
   function formatLabelNoSuffix(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -79,7 +78,7 @@
   const baseHSL = hexToHsl(BASE_HEX);
   const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
 
-  // ========= Mapeo de niveles =========
+  // ========= Mapeo de niveles (¡los que faltaban!) =========
   function mapNivelDisplay(s){
     const t = String(s||"").toUpperCase().trim();
     if(t.includes("GOBIERNO NACIONAL")) return "NACIONAL";
@@ -172,7 +171,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField: F.monto, outStatisticFieldName:"sum_pim" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL)`,
+      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL) AND UPPER(${F.funcion})=UPPER('SANEAMIENTO')`,
       groupByFieldsForStatistics: `${F.anio},${F.nivel}`,
       outStatistics: outStats,
       orderByFields: `${F.anio} ASC, ${F.nivel} ASC`,
@@ -288,7 +287,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_pim" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
+      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
       groupByFieldsForStatistics: F.dpto,
       outStatistics: outStats,
       orderByFields: `sum_pim DESC`,
@@ -359,6 +358,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.prov} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
 
@@ -434,6 +434,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.dist} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}') AND ` +
       `UPPER(${F.prov})=UPPER('${esc(prov)}')`;
