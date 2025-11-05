@@ -35,17 +35,17 @@
   const F = {
     anio : "ano_eje",
     nivel: "nivel_gobierno_nombre",
-    monto: "monto_devengado",              // << cambiado a devengado
+    monto: "monto_devengado",              // devengado
     dpto : "departamento_ejecutora_nombre",
     prov : "provincia_ejecutora_nombre",
-    dist : "distrito_ejecutora_nombre"
+    dist : "distrito_ejecutora_nombre",
+    funcion: "funcion_nombre"              // <— para el filtro
   };
 
   // ========= Formatos =========
   const nf1   = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const nf2cur= new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Eje Y: S/ 1 decimal + sufijo mil/mill (solo en eje)
   function formatAxisShort(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -53,7 +53,6 @@
     if(abs >= 1_000)     return "S/ " + nf1.format(v/1_000) + " mil";
     return "S/ " + nf1.format(v);
   }
-  // Etiquetas de dato: misma escala, sin sufijo
   function formatLabelNoSuffix(v){
     if(v == null || isNaN(v)) return "";
     const abs = Math.abs(v);
@@ -172,7 +171,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField: F.monto, outStatisticFieldName:"sum_dev" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL)`,
+      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL) AND UPPER(${F.funcion})=UPPER('SANEAMIENTO')`,
       groupByFieldsForStatistics: `${F.anio},${F.nivel}`,
       outStatistics: outStats,
       orderByFields: `${F.anio} ASC, ${F.nivel} ASC`,
@@ -288,7 +287,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_dev" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
+      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
       groupByFieldsForStatistics: F.dpto,
       outStatistics: outStats,
       orderByFields: `sum_dev DESC`,
@@ -359,6 +358,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.prov} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
 
@@ -434,6 +434,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.dist} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}') AND ` +
       `UPPER(${F.prov})=UPPER('${esc(prov)}')`;
@@ -518,4 +519,5 @@
 </script>
 </body>
 </html>
+
 
