@@ -27,19 +27,19 @@
 <script>
 (function(){
   // ========= Servicio / tabla =========
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/pfdserver/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
-  const TABLE_ID = 15; // mv_mef_presupuesto_ejecucion_gasto_funcion_da_xproyecto
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/OGEI/Mapa_Inversiones_MEF/MapServer";
+  const TABLE_ID = 3;
   const tableUrl = SERVICE + "/" + TABLE_ID;
 
   // ========= Campos =========
   const F = {
     anio : "ano_eje",
     nivel: "nivel_gobierno_nombre",
-    monto: "monto_devengado",              // devengado
+    monto: "monto_devengado", // <-- CAMBIO A DEVENGADO
     dpto : "departamento_ejecutora_nombre",
     prov : "provincia_ejecutora_nombre",
     dist : "distrito_ejecutora_nombre",
-    funcion: "funcion_nombre"              // <— para el filtro
+    funcion: "funcion_nombre"
   };
 
   // ========= Formatos =========
@@ -129,7 +129,12 @@
   const baseOption = {
     backgroundColor: '#ffffff',
     grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
-    legend: { top: 12, left: 'center', itemWidth: 18, itemHeight: 10, icon: 'roundRect', textStyle: { fontSize: 12 } },
+    // Leyenda: mostrar trazo (solid/dashed/dotted)
+    legend: { 
+      top: 12, left: 'center',
+      itemWidth: 32, itemHeight: 12,
+      textStyle: { fontSize: 12 }
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
@@ -137,7 +142,9 @@
         const year = params?.[0]?.axisValue ?? '';
         const lines = [`<b>${year}</b>`];
         (params||[]).forEach(p=>{
-          const full = nf2cur.format(+p.value);
+          const v = Number(p.value);
+          const safe = Number.isFinite(v) ? v : 0;
+          const full = nf2cur.format(safe);
           lines.push(`${p.marker} ${p.seriesName}: <b>${full}</b>`);
         });
         return lines.join('<br/>');
@@ -171,7 +178,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField: F.monto, outStatisticFieldName:"sum_dev" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL) AND UPPER(${F.funcion})=UPPER('SANEAMIENTO')`,
+      where: `(${F.anio} IS NOT NULL) AND (${F.monto} IS NOT NULL) AND (${F.nivel} IS NOT NULL) AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`,
       groupByFieldsForStatistics: `${F.anio},${F.nivel}`,
       outStatistics: outStats,
       orderByFields: `${F.anio} ASC, ${F.nivel} ASC`,
@@ -200,9 +207,7 @@
 
     const seriesPrep = ORDER.map(name=>{
       const data = years.map(y => (agg.has(name+"|"+y) ? +agg.get(name+"|"+y) : null));
-      const valid = data.filter(v=>v!=null);
-      const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
-      return { name, data, mean };
+      return { name, data };
     }).filter(s => s.data.some(v=>v!=null));
 
     const n = Math.max(1, seriesPrep.length);
@@ -220,7 +225,7 @@
         showSymbol: true,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { width: 2, color: col, type: lineType },
+        lineStyle: { width: 2, color: col, type: lineType }, // trazo reflejado en leyenda
         itemStyle: { color: col },
         emphasis: { focus: 'series', scale: false },
         clip: true,
@@ -287,7 +292,7 @@
     const outStats = JSON.stringify([{ statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_dev" }]);
 
     const res = await getJSON(tableUrl + "/query", {
-      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
+      where: `${F.anio}=${Number(year)} AND UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ${F.monto} IS NOT NULL AND ${F.dpto} IS NOT NULL`,
       groupByFieldsForStatistics: F.dpto,
       outStatistics: outStats,
       orderByFields: `sum_dev DESC`,
@@ -317,7 +322,9 @@
         axisPointer:{ type:'shadow' },
         formatter:(params)=>{
           const p = params && params[0]; if(!p) return '';
-          const full = nf2cur.format(+p.value);
+          const v = Number(p.value);
+          const safe = Number.isFinite(v) ? v : 0;
+          const full = nf2cur.format(safe);
           return `${p.axisValueLabel}<br><b>${full}</b>`;
         }
       },
@@ -358,7 +365,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
-      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
+      `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.prov} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
 
@@ -393,7 +400,9 @@
         axisPointer:{ type:'shadow' },
         formatter:(params)=>{
           const p = params && params[0]; if(!p) return '';
-          const full = nf2cur.format(+p.value);
+          const v = Number(p.value);
+          const safe = Number.isFinite(v) ? v : 0;
+          const full = nf2cur.format(safe);
           return `${p.axisValueLabel}<br><b>${full}</b>`;
         }
       },
@@ -434,7 +443,7 @@
     const where =
       `${F.anio}=${Number(year)} AND ` +
       `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
-      `UPPER(${F.funcion})=UPPER('SANEAMIENTO') AND ` +
+      `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ` +
       `${F.monto} IS NOT NULL AND ${F.dist} IS NOT NULL AND ` +
       `UPPER(${F.dpto})=UPPER('${esc(dep)}') AND ` +
       `UPPER(${F.prov})=UPPER('${esc(prov)}')`;
@@ -470,7 +479,9 @@
         axisPointer:{ type:'shadow' },
         formatter:(params)=>{
           const p = params && params[0]; if(!p) return '';
-          const full = nf2cur.format(+p.value);
+          const v = Number(p.value);
+          const safe = Number.isFinite(v) ? v : 0;
+          const full = nf2cur.format(safe);
           return `${p.axisValueLabel}<br><b>${full}</b>`;
         }
       },
@@ -519,5 +530,4 @@
 </script>
 </body>
 </html>
-
 
