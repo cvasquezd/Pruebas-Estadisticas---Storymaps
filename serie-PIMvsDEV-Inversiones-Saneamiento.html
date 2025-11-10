@@ -97,6 +97,27 @@
   }
   function esc(v){ return String(v).replace(/'/g,"''"); }
 
+  // === Mapeo especial para CALLAO ===
+  function mapDeptDisplay(name){
+    const t = String(name||'').trim().toUpperCase();
+    if(t === 'PROVINCIA CONSTITUCIONAL DEL CALLAO') return 'CALLAO';
+    return String(name||'');
+  }
+  function mapDeptToOriginal(display){
+    const t = String(display||'').trim().toUpperCase();
+    if(t === 'CALLAO') return 'PROVINCIA CONSTITUCIONAL DEL CALLAO';
+    return display;
+  }
+
+  // === Espaciador condicional (solo si hay muchas barras)
+  // Cambia el umbral si deseas: 6 significa que con 6 o más barras se agrega el espaciador.
+  const SPACER_THRESHOLD = 6;
+  function withOptionalSpacer(x, yP, yD){
+    const need = x.length >= SPACER_THRESHOLD;
+    if(!need) return { xPlot: x, yPPlot: yP, yDPlot: yD, need };
+    return { xPlot: [' ', ...x], yPPlot: [null, ...yP], yDPlot: [null, ...yD], need };
+  }
+
   // ECharts
   const chart = echarts.init(document.getElementById('chart'));
   window.addEventListener('resize', ()=>chart.resize());
@@ -123,6 +144,7 @@
       axisPointer:{ type:'line' },
       formatter:(params)=>{
         const x = params?.[0]?.axisValue ?? '';
+        if(String(x).trim()==='') return ''; // evitar tooltip en un posible espaciador
         const lines = [`<b>${x}</b>`];
         (params||[]).forEach(p=>{
           const v = Number(p.value);
@@ -199,13 +221,11 @@
       ...baseOption,
       title: [
         { ...baseOption.title[0], text: "" },
-        { ...baseOption.title[1], text: "Función: SANEAMIENTO + SALUD Y SANEAMIENTO" }
+        { ...baseOption.title[1], text: "" }
       ],
       xAxis:{ ...baseOption.xAxis, data: years, name:'Años' },
       yAxis:{ ...baseOption.yAxis, name:'Monto (S/)' },
-      legend:{ // leyenda con trazo (líneas)
-        ...baseOption.legend
-      },
+      legend:{ ...baseOption.legend }, // trazo
       series:[
         { name:'PIM', type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:8,
           lineStyle:{ width:2, color:cPim, type:'dashed' }, itemStyle:{ color:cPim }, emphasis:{ focus:'series', scale:false }, clip:true,
@@ -220,7 +240,7 @@
           labelLayout:{ hideOverlap:true },
           data:dataDev }
       ],
-      graphic: [] // sin volver
+      graphic: []
     });
 
     chart.off('click');
@@ -259,7 +279,7 @@
     if(!feats.length) throw new Error(`Sin datos para el año ${year}.`);
 
     const rows = feats.map(f=>({
-      name: String(f.attributes[F.dpto]),
+      name: mapDeptDisplay(f.attributes[F.dpto]),
       pim : Number(f.attributes.sum_pim || 0),
       dev : Number(f.attributes.sum_dev || 0)
     })).filter(r=>r.name).sort((a,b)=>b.pim-a.pim);
@@ -268,27 +288,32 @@
     const yP = rows.map(r=>r.pim);
     const yD = rows.map(r=>r.dev);
 
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
     chart.clear();
     chart.setOption({
       backgroundColor:'#fff',
       title: [
-        { left:'center', top:10, text:`Departamentos — Año ${year}`, textStyle:{ fontSize:16, fontWeight:700, color:'#111827' } },
-        { left:'center', top:36, text:`Función: SANEAMIENTO + SALUD Y SANEAMIENTO`, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
+        { left:'center', top:10, text:`${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } },
+        { left:'center', top:36, text:``, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
       ],
-      grid:{ left:96, right:40, top:110, bottom:100, containLabel:true },
-      legend:{                         // <- LEYENDA EN SÓLIDO PARA BARRAS
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{
         top:64, left:'center',
-        itemWidth:18, itemHeight:10,
-        icon:'roundRect',
+        itemWidth:18, itemHeight:10, icon:'roundRect',
         textStyle:{ fontSize:12 },
         data:['PIM','Devengado']
       },
       tooltip: baseOption.tooltip,
-      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
       yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
       series:[
-        { name:'PIM', type:'bar', data:yP, itemStyle:{ color:cPim }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } },
-        { name:'Devengado', type:'bar', data:yD, itemStyle:{ color:cDev }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } }
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } }
       ],
       animation:true,
       animationDuration:1200,
@@ -298,9 +323,11 @@
     chart.off('click');
     chart.on('click', (ev)=>{
       if(ev.componentType==='series' && ev.seriesType==='bar'){
-        const dep = ev.name;
+        if(String(ev.name).trim()==='') return; // si hubiera espaciador
+        const depDisplay = ev.name;
+        const depOriginal = mapDeptToOriginal(depDisplay);
         pushBack(()=>loadBarsDept({ year }));
-        loadBarsProv({ year, dep }).catch(showErr);
+        loadBarsProv({ year, depDisplay, depOriginal }).catch(showErr);
       }
     });
 
@@ -308,7 +335,7 @@
   }
 
   // ====== Vista 2: Barras por Provincia ======
-  async function loadBarsProv({ year, dep }){
+  async function loadBarsProv({ year, depDisplay, depOriginal }){
     setTopTitle(TITLE_PROV);
     $loading.style.display = 'flex';
 
@@ -320,7 +347,7 @@
     const where =
       `${F.anio}=${Number(year)} AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') `+
       `AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND ${F.prov} IS NOT NULL `+
-      `AND UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
+      `AND UPPER(${F.dpto})=UPPER('${esc(depOriginal)}')`;
 
     const res = await getJSON(tableUrl + "/query", {
       where, groupByFieldsForStatistics: F.prov, outStatistics: outStats,
@@ -329,7 +356,7 @@
     });
 
     const feats = res.data?.features || [];
-    if(!feats.length) throw new Error(`Sin datos para ${dep} en ${year}.`);
+    if(!feats.length) throw new Error(`Sin datos para ${depDisplay} en ${year}.`);
 
     const rows = feats.map(f=>({
       name: String(f.attributes[F.prov]),
@@ -341,27 +368,32 @@
     const yP = rows.map(r=>r.pim);
     const yD = rows.map(r=>r.dev);
 
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
     chart.clear();
     chart.setOption({
       backgroundColor:'#fff',
       title: [
-        { left:'center', top:10, text:`Departamento: ${dep}`, textStyle:{ fontSize:16, fontWeight:700, color:'#111827' } },
-        { left:'center', top:36, text:`Año ${year} — Función: SANEAMIENTO + SALUD Y SANEAMIENTO`, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
+        { left:'center', top:10, text:`${depDisplay} — ${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } },
+        { left:'center', top:36, text:``, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
       ],
-      grid:{ left:96, right:40, top:110, bottom:100, containLabel:true },
-      legend:{                         // <- sólido
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{
         top:64, left:'center',
-        itemWidth:18, itemHeight:10,
-        icon:'roundRect',
+        itemWidth:18, itemHeight:10, icon:'roundRect',
         textStyle:{ fontSize:12 },
         data:['PIM','Devengado']
       },
       tooltip: baseOption.tooltip,
-      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
       yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
       series:[
-        { name:'PIM', type:'bar', data:yP, itemStyle:{ color:cPim }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } },
-        { name:'Devengado', type:'bar', data:yD, itemStyle:{ color:cDev }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } }
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } }
       ],
       animation:true,
       animationDuration:1200,
@@ -371,9 +403,10 @@
     chart.off('click');
     chart.on('click', (ev)=>{
       if(ev.componentType==='series' && ev.seriesType==='bar'){
+        if(String(ev.name).trim()==='') return;
         const prov = ev.name;
-        pushBack(()=>loadBarsProv({ year, dep }));
-        loadBarsDist({ year, dep, prov }).catch(showErr);
+        pushBack(()=>loadBarsProv({ year, depDisplay, depOriginal }));
+        loadBarsDist({ year, depDisplay, depOriginal, prov }).catch(showErr);
       }
     });
 
@@ -381,7 +414,7 @@
   }
 
   // ====== Vista 3: Barras por Distrito ======
-  async function loadBarsDist({ year, dep, prov }){
+  async function loadBarsDist({ year, depDisplay, depOriginal, prov }){
     setTopTitle(TITLE_DIST);
     $loading.style.display = 'flex';
 
@@ -393,7 +426,7 @@
     const where =
       `${F.anio}=${Number(year)} AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') `+
       `AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND ${F.dist} IS NOT NULL `+
-      `AND UPPER(${F.dpto})=UPPER('${esc(dep)}') AND UPPER(${F.prov})=UPPER('${esc(prov)}')`;
+      `AND UPPER(${F.dpto})=UPPER('${esc(depOriginal)}') AND UPPER(${F.prov})=UPPER('${esc(prov)}')`;
 
     const res = await getJSON(tableUrl + "/query", {
       where, groupByFieldsForStatistics: F.dist, outStatistics: outStats,
@@ -402,7 +435,7 @@
     });
 
     const feats = res.data?.features || [];
-    if(!feats.length) throw new Error(`Sin datos para ${prov} — ${dep} en ${year}.`);
+    if(!feats.length) throw new Error(`Sin datos para ${prov} — ${depDisplay} en ${year}.`);
 
     const rows = feats.map(f=>({
       name: String(f.attributes[F.dist]),
@@ -414,27 +447,32 @@
     const yP = rows.map(r=>r.pim);
     const yD = rows.map(r=>r.dev);
 
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
     chart.clear();
     chart.setOption({
       backgroundColor:'#fff',
       title: [
-        { left:'center', top:10, text:`Departamento: ${dep} — Provincia: ${prov}`, textStyle:{ fontSize:16, fontWeight:700, color:'#111827' } },
-        { left:'center', top:36, text:`Año ${year} — Función: SANEAMIENTO + SALUD Y SANEAMIENTO`, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
+        { left:'center', top:10, text:`${depDisplay} — ${prov} — ${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } },
+        { left:'center', top:36, text:``, textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
       ],
-      grid:{ left:96, right:40, top:110, bottom:100, containLabel:true },
-      legend:{                         // <- sólido
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{
         top:64, left:'center',
-        itemWidth:18, itemHeight:10,
-        icon:'roundRect',
+        itemWidth:18, itemHeight:10, icon:'roundRect',
         textStyle:{ fontSize:12 },
         data:['PIM','Devengado']
       },
       tooltip: baseOption.tooltip,
-      xAxis:{ type:'category', data:x, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)) } },
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
       yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
       series:[
-        { name:'PIM', type:'bar', data:yP, itemStyle:{ color:cPim }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } },
-        { name:'Devengado', type:'bar', data:yD, itemStyle:{ color:cDev }, label:{ show:true, position:'top', formatter:(p)=>formatLabelNoSuffix(+p.value) } }
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev },
+          label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8,
+                  formatter:(p)=> String(p.name).trim()==='' ? '' : formatLabelNoSuffix(+p.value) } }
       ],
       animation:true,
       animationDuration:1200,
