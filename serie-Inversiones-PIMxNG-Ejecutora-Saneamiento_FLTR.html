@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{ --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08); }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 6px;text-align:center}
+    .sub{color:var(--muted);font-size:12px;margin:0 0 14px;text-align:center}
+
+    /* ====== Filtros compactos con popover ====== */
+    .filtersbar{ display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; margin:8px 0 14px; }
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      background:#fff; border:1px solid #e5e7eb; border-radius:999px; padding:8px 12px;
+      font-size:12px; color:#111827; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04);
+      position:relative;
+    }
+    .chip:hover{ box-shadow:0 2px 8px rgba(0,0,0,.08) }
+    .chip .caret{ font-size:10px; color:#6b7280 }
+
+    .popover{
+      position:absolute; left:0; top:40px; z-index:9999;
+      background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.12);
+      padding:10px; width:300px; display:none;
+    }
+    .popover.open{ display:block; }
+    .popover h4{ margin:0 0 6px; font-size:12px; color:#111827 }
+    .popover .hint{ font-size:11px; color:#6b7280; margin-bottom:6px }
+    .popover .list{
+      width:100%; max-height:220px; overflow:auto; border:1px solid #e5e7eb; border-radius:8px; padding:6px;
+    }
+    .chk{ display:flex; align-items:center; gap:8px; font-size:12px; padding:4px 2px; }
+    .chk input{ width:14px; height:14px; }
+
+    .btn{
+      padding:7px 12px; font-size:12px; border:1px solid #e5e7eb; background:#fff; border-radius:10px; cursor:pointer;
+    }
+    .btn:hover{ box-shadow:0 2px 8px rgba(0,0,0,.08) }
+
+    #chart{height:70vh;min-height:460px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);position:relative}
+    #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1 id="topTitle">Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones</h1>
+  <p class="sub">Fuente: MEF- Consulta amigable</p>
+
+  <!-- ====== BARRA DE FILTROS (botones centrados) ====== -->
+  <div class="filtersbar" id="filtersbar">
+    <!-- Departamento -->
+    <div class="chip" data-pop="pop-dep" id="chip-dep" title="Filtrar por Departamento (ejecutora)">
+      <span>Departamento Ejec</span><span class="caret">▾</span>
+      <div class="popover" id="pop-dep">
+        <h4>Departamento (ejecutora)</h4>
+        <div class="hint">Marca múltiples opciones</div>
+        <div class="list" id="list-dep"></div>
+      </div>
+    </div>
+
+    <!-- Provincia -->
+    <div class="chip" data-pop="pop-prov" id="chip-prov" title="Filtrar por Provincia (ejecutora)">
+      <span>Provincia Ejec</span><span class="caret">▾</span>
+      <div class="popover" id="pop-prov">
+        <h4>Provincia (ejecutora)</h4>
+        <div class="hint">Marca múltiples opciones</div>
+        <div class="list" id="list-prov"></div>
+      </div>
+    </div>
+
+    <!-- Distrito -->
+    <div class="chip" data-pop="pop-dist" id="chip-dist" title="Filtrar por Distrito (ejecutora)">
+      <span>Distrito Ejec</span><span class="caret">▾</span>
+      <div class="popover" id="pop-dist">
+        <h4>Distrito (ejecutora)</h4>
+        <div class="hint">Marca múltiples opciones</div>
+        <div class="list" id="list-dist"></div>
+      </div>
+    </div>
+
+    <button class="btn" id="btnApplyAll" title="Aplicar filtros al gráfico de líneas">Aplicar a líneas</button>
+    <button class="btn" id="btnClearAll" title="Limpiar todos los filtros">Limpiar</button>
+  </div>
+
+  <div id="chart"><div id="loading">Cargando datos…</div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  // ===== Servicio / tabla =====
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/OGEI/Mapa_Inversiones_MEF/MapServer";
+  const TABLE_ID = 3;
+  const tableUrl = SERVICE + "/" + TABLE_ID;
+
+  // Campos
+  const F = {
+    anio:"ano_eje", pim:"monto_pim", dev:"monto_devengado", funcion:"funcion_nombre",
+    dpto:"departamento_ejecutora_nombre", prov:"provincia_ejecutora_nombre", dist:"distrito_ejecutora_nombre"
+  };
+
+  // Títulos externos
+  const TITLE_LINE = "Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones";
+  const TITLE_DEPT = "Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones según departamento ejecutora";
+  const TITLE_PROV = "Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones según provincia ejecutora";
+  const TITLE_DIST = "Montos Pim y Devengado para inversiones en saneamiento a nivel nacional en millones según distrito ejecutora";
+
+  // Formatos
+  const nf1 = new Intl.NumberFormat("es-PE", { minimumFractionDigits:1, maximumFractionDigits:1 });
+  const nf2cur = new Intl.NumberFormat("es-PE", { style:"currency", currency:"PEN", minimumFractionDigits:2, maximumFractionDigits:2 });
+  function formatAxisShort(v){ if(v==null||isNaN(v)) return ""; const a=Math.abs(v); if(a>=1_000_000) return "S/ "+nf1.format(v/1_000_000)+" mill"; if(a>=1_000) return "S/ "+nf1.format(v/1_000)+" mil"; return "S/ "+nf1.format(v); }
+  function formatLabelNoSuffix(v){ if(v==null||isNaN(v)) return ""; const a=Math.abs(v); if(a>=1_000_000) return "S/ "+nf1.format(v/1_000_000); if(a>=1_000) return "S/ "+nf1.format(v/1_000); return "S/ "+nf1.format(v); }
+
+  // Paleta
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){ const m=hex.replace('#',''); const r=parseInt(m.slice(0,2),16)/255,g=parseInt(m.slice(2,4),16)/255,b=parseInt(m.slice(4,6),16)/255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b); let h,s,l=(mx+mn)/2; if(mx===mn){h=s=0;} else{ const d=mx-mn; s=l>0.5? d/(2-mx-mn):d/(mx+mn); switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;} h/=6;} return {h:Math.round(h*360),s:Math.round(s*100),l:Math.round(l*100)};}
+  const baseHSL = hexToHsl(BASE_HEX);
+  const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
+  const cPim = hsl(baseHSL.h, baseHSL.s, Math.min(85, baseHSL.l + 10));
+  const cDev = hsl(baseHSL.h, baseHSL.s, Math.max(18, baseHSL.l - 8));
+
+  // Util
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+  const $title = document.getElementById('topTitle');
+  function setTopTitle(t){ $title.textContent = t; }
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  async function getJSON(url, params={}, timeoutMs=30000){
+    const u = qs(url, params);
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    let res;
+    try{ res = await fetch(u, { signal: ctrl.signal, mode:'cors', credentials:'omit' }); }
+    finally{ clearTimeout(to); }
+    if(!res.ok) throw new Error(`HTTP ${res.status} al consultar ${u}`);
+    const data = await res.json();
+    if(data.error) throw new Error((data.error && data.error.message) || "Failed to execute query.");
+    return { data, url: u };
+  }
+  function esc(v){ return String(v).replace(/'/g,"''"); }
+
+  // Mapeo CALLAO
+  function mapDeptDisplay(name){ const t=String(name||'').trim().toUpperCase(); if(t==='PROVINCIA CONSTITUCIONAL DEL CALLAO') return 'CALLAO'; return String(name||''); }
+  function mapDeptToOriginal(display){ const t=String(display||'').trim().toUpperCase(); if(t==='CALLAO') return 'PROVINCIA CONSTITUCIONAL DEL CALLAO'; return display; }
+
+  // Espaciador condicional (barras)
+  const SPACER_THRESHOLD = 6;
+  function withOptionalSpacer(x, yP, yD){ const need = x.length >= SPACER_THRESHOLD; if(!need) return { xPlot:x, yPPlot:yP, yDPlot:yD }; return { xPlot:[' ',...x], yPPlot:[null,...yP], yDPlot:[null,...yD] }; }
+
+  // ====== Estado filtros aplicados ======
+  const state = { dept:new Set(), prov:new Set(), dist:new Set() };
+
+  // ====== UI filtros (popover) ======
+  const $listDep = document.getElementById('list-dep');
+  const $listProv = document.getElementById('list-prov');
+  const $listDist = document.getElementById('list-dist');
+
+  function closeAllPopovers(){ document.querySelectorAll('.popover').forEach(p=>p.classList.remove('open')); }
+  document.querySelectorAll('.chip').forEach(ch=>{
+    ch.addEventListener('click', (e)=>{
+      if(e.target.closest('.popover')) return;
+      const id = ch.getAttribute('data-pop');
+      const pop = document.getElementById(id);
+      const isOpen = pop.classList.contains('open');
+      closeAllPopovers();
+      if(!isOpen) pop.classList.add('open');
+    });
+  });
+  document.addEventListener('click', (e)=>{ if(!e.target.closest('.chip')) closeAllPopovers(); });
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAllPopovers(); });
+
+  // ===== Utils WHERE con filtros =====
+  function buildInUpper(field, arr){
+    if(!arr || !arr.length) return null;
+    const vals = arr.map(v => `'${esc(String(v).toUpperCase())}'`).join(',');
+    return `UPPER(${field}) IN (${vals})`;
+  }
+
+  // where para línea (usa state aplicado)
+  function whereFromFilters(){
+    const parts = [`(UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO'))`];
+    if(state.dept.size){
+      const depVals = Array.from(state.dept).map(v => mapDeptToOriginal(v));
+      const clause = buildInUpper(F.dpto, depVals);
+      if(clause) parts.push(clause);
+    }
+    if(state.prov.size){
+      const clause = buildInUpper(F.prov, Array.from(state.prov));
+      if(clause) parts.push(clause);
+    }
+    if(state.dist.size){
+      const clause = buildInUpper(F.dist, Array.from(state.dist));
+      if(clause) parts.push(clause);
+    }
+    return parts.join(' AND ');
+  }
+
+  // where para poblar listas en cascada (usa selección actual de UI)
+  function whereForCascade(uiSel){
+    const parts = [`UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`];
+    if(uiSel.dept.length){
+      const depVals = uiSel.dept.map(v => mapDeptToOriginal(v));
+      parts.push(buildInUpper(F.dpto, depVals));
+    }
+    if(uiSel.prov.length){
+      parts.push(buildInUpper(F.prov, uiSel.prov));
+    }
+    return parts.filter(Boolean).join(' AND ');
+  }
+
+  // Lee selección actual (checkboxes) sin aplicar aún
+  function getUISelections(){
+    return {
+      dept: Array.from($listDep.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value),
+      prov: Array.from($listProv.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value),
+      dist: Array.from($listDist.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value),
+    };
+  }
+
+  // ====== Crear checkboxes ======
+  function makeCheckbox(container, value, checked, onChange){
+    const id = container.id + '-' + Math.random().toString(36).slice(2,8);
+    const wrap = document.createElement('label'); wrap.className='chk';
+    const input = document.createElement('input'); input.type='checkbox'; input.value=value; input.checked=checked||false; input.id=id;
+    const span = document.createElement('span'); span.textContent = value;
+    input.addEventListener('change', onChange);
+    wrap.appendChild(input); wrap.appendChild(span);
+    container.appendChild(wrap);
+  }
+
+  async function populateDistinct(container, field, whereExtra, mapFn=(x)=>x, keepCheckedFromContainer=true){
+    const prevChecked = keepCheckedFromContainer
+      ? new Set(Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value))
+      : new Set();
+    container.innerHTML = '<div class="hint">Cargando…</div>';
+    const where = `${field} IS NOT NULL AND ${whereExtra}`;
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: field,
+      outStatistics: JSON.stringify([{ statisticType:"count", onStatisticField:"*", outStatisticFieldName:"c" }]),
+      orderByFields: `UPPER(${field}) ASC`,
+      returnGeometry: "false", f: "json"
+    });
+    const values = (res.data?.features||[])
+      .map(f => String(f.attributes[field] ?? '').trim())
+      .filter(v => v.length>0);
+    const uniq = Array.from(new Set(values.map(v=>mapFn(v)))).sort((a,b)=>a.localeCompare(b,'es'));
+    container.innerHTML = '';
+    uniq.forEach(v=>{
+      makeCheckbox(container, v, prevChecked.has(v), onCascadeChange);
+    });
+  }
+
+  // ====== Cascada: cuando cambia una lista, repoblar las inferiores ======
+  async function onCascadeChange(){
+    try{
+      const ui = getUISelections();
+      // Provincias dependen de Dept
+      const whereProv = whereForCascade({ dept: ui.dept, prov: [] });
+      await populateDistinct($listProv, F.prov, whereProv, (x)=>x);
+      // Mantener seleccionadas las que sigan vigentes
+      ui.prov.forEach(p=>{
+        const cb = Array.from($listProv.querySelectorAll('input')).find(i=>i.value===p);
+        if(cb) cb.checked = true;
+      });
+      // Distritos dependen de Dept + Prov
+      const whereDist = whereForCascade({ dept: ui.dept, prov: ui.prov });
+      await populateDistinct($listDist, F.dist, whereDist, (x)=>x);
+      ui.dist.forEach(d=>{
+        const cb = Array.from($listDist.querySelectorAll('input')).find(i=>i.value===d);
+        if(cb) cb.checked = true;
+      });
+    }catch(e){ showErr(e); }
+  }
+
+  // ====== ECharts ======
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', ()=>chart.resize());
+
+  const ICON_SOLID  = 'path://M2,9 L26,9 L26,11 L2,11 Z';
+  const ICON_DASHED = 'path://M2,9 L8,9 L8,11 L2,11 Z M10,9 L16,9 L16,11 L10,11 Z M18,9 L24,9 L24,11 L18,11 Z';
+
+  const baseOption = {
+    backgroundColor:'#ffffff',
+    grid:{ left:96, right:40, top:110, bottom:90, containLabel:true },
+    title: [
+      { left:'center', top:10, text:'', textStyle:{ fontSize:16, fontWeight:700, color:'#111827' } }, // ← aquí va NACIONAL / AMAZONAS / AMAZONAS — BAGUA
+      { left:'center', top:36, text:'', textStyle:{ fontSize:12, fontWeight:500, color:'#6b7280' } }
+    ],
+    legend:{
+      top:64, left:'center',
+      itemWidth:26, itemHeight:10,
+      textStyle:{ fontSize:12 },
+      data:[ { name:'PIM', icon: ICON_DASHED }, { name:'Devengado', icon: ICON_SOLID } ]
+    },
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{ type:'line' },
+      formatter:(params)=>{
+        const x = params?.[0]?.axisValue ?? '';
+        const lines = [`<b>${x}</b>`];
+        (params||[]).forEach(p=>{
+          const v = Number(p.value);
+          const full = nf2cur.format(Number.isFinite(v)?v:0);
+          lines.push(`${p.marker} ${p.seriesName}: <b>${full}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis:{ type:'category', boundaryGap:true, name:'Años', nameLocation:'middle', nameGap:34, axisTick:{alignWithLabel:true}, axisLabel:{margin:14}, animation:false, data:[] },
+    yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v), margin:12 }, splitLine:{show:true}, scale:true },
+    animation:true,
+    animationDuration:1600,
+    animationDurationUpdate:1600,
+    series:[]
+  };
+  chart.setOption(baseOption);
+
+  function backGraphic(color, onClick){
+    return [{
+      type:'group', left:10, top:10, z:100, bounding:'all', cursor:'pointer', onclick:onClick,
+      children:[
+        {type:'circle', shape:{cx:18, cy:18, r:18}, style:{fill:'#fff', stroke:color, lineWidth:2, shadowBlur:6, shadowColor:'rgba(0,0,0,.08)'}},
+        {type:'polyline', shape:{points:[[22,10],[14,18],[22,26]]}, style:{stroke:color, lineWidth:3, lineCap:'round', lineJoin:'round'}}
+      ]
+    }];
+  }
+
+  // Navegación
+  let drillStack = [];
+  function pushBack(fn){ drillStack.push(fn); }
+  async function goBack(){ if(!drillStack.length){ await loadLine(); return; } const fn = drillStack.pop(); await fn(); }
+  document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+
+  // Texto de ámbito para el título superior del gráfico de líneas
+  function scopeTitle(){
+    const d = Array.from(state.dept);
+    const p = Array.from(state.prov);
+    const t = Array.from(state.dist);
+    if(d.length===1 && p.length===0 && t.length===0) return d[0];
+    if(d.length===1 && p.length===1 && t.length===0) return `${d[0]} — ${p[0]}`;
+    if(d.length===1 && p.length===1 && t.length===1) return `${d[0]} — ${p[0]} — ${t[0]}`;
+    return "NACIONAL";
+  }
+
+  // ====== LÍNEAS (Años) ======
+  async function loadLine(){
+    setTopTitle(TITLE_LINE);
+    $loading.style.display = 'flex';
+
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.pim, outStatisticFieldName:"sum_pim" },
+      { statisticType:"sum", onStatisticField:F.dev, outStatisticFieldName:"sum_dev" }
+    ]);
+
+    const where = `(${F.anio} IS NOT NULL) AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND ${whereFromFilters()}`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: F.anio,
+      outStatistics: outStats,
+      orderByFields: `${F.anio} ASC`,
+      returnGeometry: "false", f: "json", resultType:"standard", cacheHint:"true"
+    });
+
+    const feats = res.data?.features || [];
+    if(!feats.length) throw new Error("La consulta no devolvió filas.");
+
+    const rows = feats.map(f=>({
+      anio: Number(f.attributes[F.anio]),
+      pim : Number(f.attributes.sum_pim || 0),
+      dev : Number(f.attributes.sum_dev || 0)
+    })).filter(r=>!isNaN(r.anio)).sort((a,b)=>a.anio-b.anio);
+
+    const years = rows.map(r=>String(r.anio));
+    const dataPim = rows.map(r=>r.pim);
+    const dataDev = rows.map(r=>r.dev);
+
+    chart.clear();
+    chart.setOption({
+      ...baseOption,
+      title:[ { ...baseOption.title[0], text: scopeTitle() }, { ...baseOption.title[1], text:"" } ],
+      xAxis:{ ...baseOption.xAxis, data: years },
+      series:[
+        { name:'PIM', type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:8,
+          lineStyle:{ width:2, color:cPim, type:'dashed' }, itemStyle:{ color:cPim },
+          label:{ show:true, position:'top', distance:6, fontSize:11, color:'#111827', formatter:(p)=>isFinite(p.value)?formatLabelNoSuffix(+p.value):'' },
+          labelLayout:{ hideOverlap:true }, data:dataPim },
+        { name:'Devengado', type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:8,
+          lineStyle:{ width:2, color:cDev, type:'solid' }, itemStyle:{ color:cDev },
+          label:{ show:true, position:'top', distance:6, fontSize:11, color:'#111827', formatter:(p)=>isFinite(p.value)?formatLabelNoSuffix(+p.value):'' },
+          labelLayout:{ hideOverlap:true }, data:dataDev }
+      ],
+      graphic:[]
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='line'){
+        const year = String(ev.name);
+        drillStack = [];
+        loadBarsDept({ year }).catch(showErr);
+      }
+    });
+
+    $loading.style.display = 'none';
+    $err.style.display = 'none';
+    $err.textContent = '';
+  }
+
+  // ====== Barras por Departamento ======
+  async function loadBarsDept({ year }){
+    setTopTitle(TITLE_DEPT);
+    $loading.style.display = 'flex';
+
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.pim, outStatisticFieldName:"sum_pim" },
+      { statisticType:"sum", onStatisticField:F.dev, outStatisticFieldName:"sum_dev" }
+    ]);
+
+    const res = await getJSON(tableUrl + "/query", {
+      where: `${F.anio}=${Number(year)} AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ${F.dpto} IS NOT NULL`,
+      groupByFieldsForStatistics: F.dpto,
+      outStatistics: outStats,
+      orderByFields: `sum_pim DESC`,
+      returnGeometry: "false", f:"json", resultType:"standard", cacheHint:"true"
+    });
+
+    const rows = (res.data?.features||[]).map(f=>({
+      name: mapDeptDisplay(f.attributes[F.dpto]),
+      pim : Number(f.attributes.sum_pim||0),
+      dev : Number(f.attributes.sum_dev||0)
+    })).filter(r=>r.name).sort((a,b)=>b.pim-a.pim);
+
+    const x = rows.map(r=>r.name), yP = rows.map(r=>r.pim), yD = rows.map(r=>r.dev);
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#fff',
+      title:[ { left:'center', top:10, text:`${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } }, { left:'center', top:36, text:``, textStyle:{ fontSize:12, color:'#6b7280' } } ],
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{ top:64, left:'center', itemWidth:18, itemHeight:10, icon:'roundRect', textStyle:{ fontSize:12 }, data:['PIM','Devengado'] },
+      tooltip: baseOption.tooltip,
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
+      yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } }
+      ],
+      animation:true, animationDuration:1200,
+      graphic: backGraphic(cDev, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        if(String(ev.name).trim()==='') return;
+        const depDisplay = ev.name, depOriginal = mapDeptToOriginal(depDisplay);
+        pushBack(()=>loadBarsDept({ year }));
+        loadBarsProv({ year, depDisplay, depOriginal }).catch(showErr);
+      }
+    });
+
+    $loading.style.display = 'none';
+  }
+
+  // ====== Barras por Provincia ======
+  async function loadBarsProv({ year, depDisplay, depOriginal }){
+    setTopTitle(TITLE_PROV);
+    $loading.style.display = 'flex';
+
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.pim, outStatisticFieldName:"sum_pim" },
+      { statisticType:"sum", onStatisticField:F.dev, outStatisticFieldName:"sum_dev" }
+    ]);
+
+    const where = `${F.anio}=${Number(year)} AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ${F.prov} IS NOT NULL AND UPPER(${F.dpto})=UPPER('${esc(depOriginal)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where, groupByFieldsForStatistics: F.prov, outStatistics: outStats, orderByFields: `sum_pim DESC`,
+      returnGeometry:"false", f:"json", resultType:"standard", cacheHint:"true"
+    });
+
+    const rows = (res.data?.features||[]).map(f=>({
+      name: String(f.attributes[F.prov]),
+      pim : Number(f.attributes.sum_pim||0),
+      dev : Number(f.attributes.sum_dev||0)
+    })).filter(r=>r.name).sort((a,b)=>b.pim-a.pim);
+
+    const x = rows.map(r=>r.name), yP = rows.map(r=>r.pim), yD = rows.map(r=>r.dev);
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#fff',
+      title:[ { left:'center', top:10, text:`${depDisplay} — ${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } }, { left:'center', top:36, text:``, textStyle:{ fontSize:12, color:'#6b7280' } } ],
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{ top:64, left:'center', itemWidth:18, itemHeight:10, icon:'roundRect', textStyle:{ fontSize:12 }, data:['PIM','Devengado'] },
+      tooltip: baseOption.tooltip,
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
+      yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } }
+      ],
+      animation:true, animationDuration:1200,
+      graphic: backGraphic(cDev, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        if(String(ev.name).trim()==='') return;
+        const prov = ev.name;
+        pushBack(()=>loadBarsProv({ year, depDisplay, depOriginal }));
+        loadBarsDist({ year, depDisplay, depOriginal, prov }).catch(showErr);
+      }
+    });
+
+    $loading.style.display = 'none';
+  }
+
+  // ====== Barras por Distrito ======
+  async function loadBarsDist({ year, depDisplay, depOriginal, prov }){
+    setTopTitle(TITLE_DIST);
+    $loading.style.display = 'flex';
+
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.pim, outStatisticFieldName:"sum_pim" },
+      { statisticType:"sum", onStatisticField:F.dev, outStatisticFieldName:"sum_dev" }
+    ]);
+
+    const where = `${F.anio}=${Number(year)} AND (${F.pim} IS NOT NULL OR ${F.dev} IS NOT NULL) AND UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ${F.dist} IS NOT NULL AND UPPER(${F.dpto})=UPPER('${esc(depOriginal)}') AND UPPER(${F.prov})=UPPER('${esc(prov)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where, groupByFieldsForStatistics: F.dist, outStatistics: outStats, orderByFields: `sum_pim DESC`,
+      returnGeometry:"false", f:"json", resultType:"standard", cacheHint:"true"
+    });
+
+    const rows = (res.data?.features||[]).map(f=>({
+      name: String(f.attributes[F.dist]),
+      pim : Number(f.attributes.sum_pim||0),
+      dev : Number(f.attributes.sum_dev||0)
+    })).filter(r=>r.name).sort((a,b)=>b.pim-a.pim);
+
+    const x = rows.map(r=>r.name), yP = rows.map(r=>r.pim), yD = rows.map(r=>r.dev);
+    const { xPlot, yPPlot, yDPlot } = withOptionalSpacer(x, yP, yD);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#fff',
+      title:[ { left:'center', top:10, text:`${depDisplay} — ${prov} — ${year}`, textStyle:{ fontSize:18, fontWeight:700, color:'#111827' } }, { left:'center', top:36, text:``, textStyle:{ fontSize:12, color:'#6b7280' } } ],
+      grid:{ left:96, right:40, top:110, bottom:110, containLabel:true },
+      legend:{ top:64, left:'center', itemWidth:18, itemHeight:10, icon:'roundRect', textStyle:{ fontSize:12 }, data:['PIM','Devengado'] },
+      tooltip: baseOption.tooltip,
+      xAxis:{ type:'category', data:xPlot, axisLabel:{ interval:0, rotate:(x.length>18?40:(x.length>12?25:0)), margin:10 } },
+      yAxis:{ type:'value', name:'Monto (S/)', axisLabel:{ formatter:v=>formatAxisShort(v) }, scale:true },
+      series:[
+        { name:'PIM', type:'bar', data:yPPlot, itemStyle:{ color:cPim }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } },
+        { name:'Devengado', type:'bar', data:yDPlot, itemStyle:{ color:cDev }, label:{ show:true, position:'top', rotate:90, align:'left', verticalAlign:'middle', distance:8, formatter:(p)=>String(p.name).trim()===''?'':formatLabelNoSuffix(+p.value) } }
+      ],
+      animation:true, animationDuration:1200,
+      graphic: backGraphic(cDev, ()=>goBack())
+    });
+
+    chart.off('click');
+    $loading.style.display = 'none';
+  }
+
+  // ====== Botones externos ======
+  document.getElementById('btnApplyAll').onclick = async ()=>{
+    // Volcar selección visual -> estado
+    state.dept = new Set(Array.from($listDep.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value));
+    state.prov = new Set(Array.from($listProv.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value));
+    state.dist = new Set(Array.from($listDist.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value));
+    try{ closeAllPopovers(); $loading.style.display='flex'; await loadLine(); $loading.style.display='none'; }catch(e){ showErr(e); }
+  };
+
+  document.getElementById('btnClearAll').onclick = async ()=>{
+    [$listDep,$listProv,$listDist].forEach(c=>c.querySelectorAll('input[type=checkbox]').forEach(i=>i.checked=false));
+    state.dept.clear(); state.prov.clear(); state.dist.clear(); closeAllPopovers();
+    try{
+      // repoblar cascada “en blanco”
+      await populateDistinct($listDep, F.dpto, `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`, mapDeptDisplay, false);
+      await populateDistinct($listProv, F.prov, `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`, (x)=>x, false);
+      await populateDistinct($listDist, F.dist, `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`, (x)=>x, false);
+      $loading.style.display='flex'; await loadLine(); $loading.style.display='none';
+    }catch(e){ showErr(e); }
+  };
+
+  // ====== Errores ======
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  // ====== Run ======
+  (async function run(){
+    try{
+      // Inicial: sin filtros → poblar todo
+      const baseWhere = `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`;
+      await populateDistinct($listDep, F.dpto, baseWhere, mapDeptDisplay, false);
+      await populateDistinct($listProv, F.prov, baseWhere, (x)=>x, false);
+      await populateDistinct($listDist, F.dist, baseWhere, (x)=>x, false);
+
+      // Enganchar cascada
+      $listDep.addEventListener('change', onCascadeChange);
+      $listProv.addEventListener('change', onCascadeChange);
+
+      $loading.style.display = 'flex';
+      await loadLine();
+      $loading.style.display = 'none';
+      $err.style.display = 'none';
+      $err.textContent = '';
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{ showErr(ev && ev.message ? ev.message : ev); }, true);
+})();
+</script>
+</body>
+</html>
