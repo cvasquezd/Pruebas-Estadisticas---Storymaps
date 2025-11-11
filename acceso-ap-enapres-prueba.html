@@ -15,23 +15,14 @@
 
     .chart-shell{
       background:var(--card); border-radius:16px; box-shadow:var(--shadow);
-      width:100%;
-      height:100%;
-      min-height:360px;
-      position:relative; overflow:hidden;
+      width:100%; height:100%; min-height:360px; position:relative; overflow:hidden;
     }
     .chart-shell[data-autoheight="1"]{ aspect-ratio:16/9; min-height:420px; }
 
-    /* EMBED StoryMaps (Sidecar) */
-    body.embed.storymaps .chart-shell{
-      height: clamp(560px, 72vh, 920px) !important;
-      min-height: 560px;
-    }
+    body.embed.storymaps .chart-shell{ height: clamp(560px, 72vh, 920px) !important; min-height: 560px; }
     body.embed.storymaps .chart-shell[data-autoheight]{ aspect-ratio:auto; }
 
-    /* EMBED genérico */
-    body.embed.generic{ overflow:hidden; }
-    body.embed.generic html, body.embed.generic body{ overflow:hidden; }
+    body.embed.generic, body.embed.generic html{ overflow:hidden; }
 
     #chart{position:absolute; inset:0}
     #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
@@ -53,18 +44,15 @@
 
 <script>
 (function(){
-  /* ====== DETECCIÓN EMBED / STORYMAPS ====== */
+  /* ====== Modo EMBED / StoryMaps ====== */
   const EMBED = (()=>{ try{ return window.self !== window.top; }catch(_){ return true; } })();
   const IS_STORYMAP = /storymaps|arcgis\.com/i.test(document.referrer||"");
-
   if (EMBED){
     document.body.classList.add('embed');
     document.body.classList.add(IS_STORYMAP ? 'storymaps' : 'generic');
   }
 
   const shell = document.getElementById('chartShell');
-
-  /* Altura dinámica para EMBED genérico (fuera de StoryMaps) */
   function applyGenericEmbedHeight(){
     if(!(EMBED && !IS_STORYMAP)) return;
     shell.setAttribute('data-autoheight','0');
@@ -73,15 +61,13 @@
       const h = Math.max(420, Math.min(Math.floor(vh*0.88), 880));
       shell.style.height = h + 'px';
       shell.style.minHeight = h + 'px';
-      document.documentElement.style.overflow = 'hidden';
-      document.body.style.overflow = 'hidden';
     };
     setH();
     window.addEventListener('resize', setH);
   }
   applyGenericEmbedHeight();
 
-  /* ====== CONFIG DATOS ====== */
+  /* ====== Datos ====== */
   const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
   const TARGET_TABLE_NAME = "tb_indicadores_serie";
   const INDICADOR_ID = "Ind_18";
@@ -176,8 +162,10 @@
     return {
       backgroundColor:'#ffffff',
       grid:{left:m.left,right:m.right,top:m.top,bottom:m.bottom,containLabel:true},
-      legend:{ type:'scroll', top:10, left:'center', itemWidth:18, itemHeight:10, icon:'roundRect',
-               textStyle:{fontSize:m.legendFont}, width:m.legendMaxWidth,
+      legend:{ type:'scroll', top:10, left:'center',
+               itemWidth:44, itemHeight:12, icon:'roundRect',
+               textStyle:{fontSize:m.legendFont},
+               width:m.legendMaxWidth,
                formatter:(name)=> (String(name).toUpperCase()==="NACIONAL"?"TOTAL":name)},
       tooltip:{ trigger:'axis', axisPointer:{type:'line'}, confine:true, appendToBody:true,
         formatter:(params)=>{
@@ -221,7 +209,7 @@
     const opt=chart.getOption(); const m=responsiveMetrics(); chart.resize();
     chart.setOption({
       grid:{left:m.left,right:m.right,top:m.top,bottom:m.bottom,containLabel:true},
-      legend:{textStyle:{fontSize:m.legendFont}, top:10, width:m.legendMaxWidth},
+      legend:{textStyle:{fontSize:m.legendFont}, top:10, left:'center', width:m.legendMaxWidth},
       xAxis:[{...(opt.xAxis?.[0]||{}), axisLabel:{...(opt.xAxis?.[0]?.axisLabel||{}), fontSize:m.axisFont}}],
       yAxis:[{...(opt.yAxis?.[0]||{}), nameTextStyle:{fontSize:m.axisFont}, axisLabel:{...(opt.yAxis?.[0]?.axisLabel||{}), fontSize:m.axisFont}}]
     });
@@ -264,14 +252,32 @@
     }];
   }
 
-  // === LÍNEA (vista nacional)
+  /* Ícono de leyenda como línea SVG, con fallback */
+  function makeLegendLineIcon(color, lineType){
+    const dash = lineType==='dashed' ? '8,6' : (lineType==='dotted' ? '2,6' : '');
+    try{
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="12" viewBox="0 0 44 12">
+           <path d="M3 6 H41" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"
+                 ${dash ? `stroke-dasharray="${dash}"` : ''}/>
+         </svg>`;
+      const uri = 'image://data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+      return uri;
+    }catch(_){
+      return 'roundRect'; // fallback seguro
+    }
+  }
+
+  /* ====== LÍNEAS ====== */
   async function loadLine(){
     const baseOpt=baseOptionFactory(); chart.clear(); chart.setOption(baseOpt);
+
     const {anio,ambito,valor,region,ind,dvals,rec,flag}=fields;
     const where = `UPPER(${region})='${REGION_TOTAL}' AND UPPER(${ind})=UPPER('${INDICADOR_ID}') AND UPPER(${dvals})=UPPER('${D_VALORES}')`;
     const outFields=[anio,ambito,valor,rec].concat(flag?[flag]:[]).join(",");
     const res=await jsonp(tableUrl+"/query",{where,outFields,orderByFields:`${anio} ASC, ${ambito} ASC`,returnGeometry:"false",f:"json"},20000);
-    const features=(res.data&&res.data.features)||[]; if(!features.length) throw new Error("La consulta no devolvió filas.");
+    const features=(res.data&&res.data.features)||[];
+    if(!features.length) throw new Error("La consulta no devolvió filas.");
 
     const raw=features.map(f=>f.attributes)
       .filter(r=>r&&r[anio]!=null&&r[ambito]!=null&&r[valor]!=null)
@@ -318,13 +324,25 @@
       const lineType=isTotal?'solid':(isUrbano?'dashed':(isRural?'dotted':'solid'));
       return { name:s.name, type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
                lineStyle:{width:2,color:col,type:lineType}, itemStyle:{color:col}, emphasis:{focus:'series',scale:false},
-               clip:true, data:s.data, _color:col, _recByYear:s.recByYear, _flagByYear:s.flagByYear };
+               clip:true, data:s.data, _color:col, _lineType:lineType, _recByYear:s.recByYear, _flagByYear:s.flagByYear };
     });
 
     const names=series.map(s=>s.name);
-    const legendData=[]; if(names.includes("NACIONAL")) legendData.push("NACIONAL"); else if(names.includes("TOTAL")) legendData.push("TOTAL");
-    if(names.includes("URBANO")) legendData.push("URBANO"); if(names.includes("RURAL")) legendData.push("RURAL");
-    names.forEach(n=>{ if(!legendData.includes(n)) legendData.push(n); });
+    const ordered=[];
+    if(names.includes("NACIONAL")) ordered.push("NACIONAL");
+    else if(names.includes("TOTAL")) ordered.push("TOTAL");
+    if(names.includes("URBANO")) ordered.push("URBANO");
+    if(names.includes("RURAL")) ordered.push("RURAL");
+    names.forEach(n=>{ if(!ordered.includes(n)) ordered.push(n); });
+
+    // Íconos + selección forzada
+    const legendData = [];
+    const selectedMap = {};
+    series.forEach(s=>{
+      const icon = makeLegendLineIcon(s._color, s._lineType) || 'roundRect';
+      legendData.push({ name: s.name, icon });
+      selectedMap[s.name] = true; // asegurar visible
+    });
 
     const vals=series.flatMap(s=>s.data).filter(v=>v!=null&&isFinite(v));
     const min=Math.min(...vals), max=Math.max(...vals);
@@ -338,7 +356,13 @@
       ...opt,
       xAxis:{ ...opt.xAxis, data:years },
       yAxis:{ ...opt.yAxis, min:yMin, max:yMax, name:'% Acceso a agua' },
-      legend:{ ...opt.legend, data:legendData },
+      legend:{
+        ...opt.legend,
+        left:'center',
+        top:10,
+        data: legendData,
+        selected: selectedMap
+      },
       series
     });
 
@@ -358,7 +382,7 @@
     onResize();
   }
 
-  // === BARRAS (drilldown)
+  /* ====== BARRAS ====== */
   async function loadBars({year, amb, color}){
     const opt=baseOptionFactory(); chart.clear(); chart.setOption({...opt, legend:{show:false}});
     const {anio, ambito, valor, region, ind, dvals, rec, flag}=fields;
@@ -381,8 +405,8 @@
     rows.sort((a,b)=>b.valor-a.valor);
 
     const x=rows.map(r=>r.region), y=rows.map(r=>r.valor);
-    const recs=rows.map(r=>r.recuento);         // ← recuentos (miles)
-    const flags=rows.map(r=>r.flag||'');        // ← flags por región
+    const recs=rows.map(r=>r.recuento);
+    const flags=rows.map(r=>r.flag||'');
 
     const m=responsiveMetrics(); const rotate=(x.length>22?50:(x.length>15?35:(x.length>10?20:0)));
     const yMaxData=Math.max(...y.filter(v=>isFinite(v))); const yMaxPad=(yMaxData>=96? yMaxData+4 : yMaxData*1.06);
@@ -403,7 +427,7 @@
           return `${p.axisValueLabel}<br><b>${vTxt}</b>${recTxt}`;
         }
       },
-      xAxis:{ type:'category', data:x, name:'', nameGap:0, axisLabel:{interval:0, rotate, fontSize:m.axisFont} }, /* sin "Años" en barras */
+      xAxis:{ type:'category', data:x, name:'', nameGap:0, axisLabel:{interval:0, rotate, fontSize:m.axisFont} },
       yAxis:{ type:'value', name:'% Acceso a agua', axisLabel:{formatter:v=>nf1.format(v), fontSize:m.axisFont}, scale:true, max:yMaxPad },
       series:[{
         name:'Región', type:'bar', data:y, itemStyle:{color:color},
@@ -439,5 +463,4 @@
 </script>
 </body>
 </html>
-
 
