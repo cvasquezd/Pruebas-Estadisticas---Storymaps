@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Porcentaje de población con acceso a servicio de agua, por ámbito</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1200px;margin:16px auto;padding:0 12px}
+    h1{font-weight:700;font-size:clamp(16px,2.2vw,22px);margin:0 0 6px;text-align:center;line-height:1.2}
+    .sub{color:var(--muted);font-size:clamp(11px,1.6vw,13px);margin:0 0 12px;text-align:center}
+
+    .chart-shell{
+      background:var(--card); border-radius:16px; box-shadow:var(--shadow);
+      width:100%;
+      height:100%;
+      min-height:360px;
+      position:relative; overflow:hidden;
+    }
+    .chart-shell[data-autoheight="1"]{ aspect-ratio: 16/9; min-height:420px; }
+
+    #chart{position:absolute; inset:0}
+    #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+             font-size:13px;color:#6b7280}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Porcentaje de población con acceso a servicio de agua, por ámbito</h1>
+  <p class="sub">Fuente: ENAPRES</p>
+
+  <div id="chartShell" class="chart-shell" data-autoheight="1">
+    <div id="chart"></div>
+    <div id="loading">Cargando datos…</div>
+  </div>
+
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
+  const TARGET_TABLE_NAME = "tb_indicadores_serie";
+  const INDICADOR_ID = "Ind_18";
+  const D_VALORES = "CON ACCESO";
+  const REGION_TOTAL = "NACIONAL";
+
+  const nf1 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  // ==== util colores
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){
+    const m=hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b); let h,s,l=(max+min)/2;
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}
+      h/=6;
+    }
+    return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
+  }
+  const baseHSL = hexToHsl(BASE_HEX);
+  const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
+  const normalizeAmb = (s)=> String(s||'').trim().toUpperCase();
+  const cleanFlag = (v)=> { const t = String(v==null?'':v).trim(); return t ? t : ''; };
+
+  function formatRecuento(vThousands){
+    if(vThousands == null || isNaN(vThousands)) return '';
+    const n = Number(vThousands);
+    const sign = n < 0 ? '-' : '';
+    const absT = Math.abs(n); // miles
+    if(absT >= 1000){
+      const millions = absT / 1000;
+      const txt = millions.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+      return `${sign}${txt} millones`;
+    }else{
+      const txt = absT.toLocaleString('es-PE', { minimumFractionDigits:1, maximumFractionDigits:1 });
+      return `${sign}${txt} mil`;
+    }
+  }
+
+  // ==== dom
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+  const shell = document.getElementById('chartShell');
+
+  // ==== helpers
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  function jsonp(url, params, timeoutMs=15000){
+    return new Promise((resolve, reject)=>{
+      const cb = "__arcgis_cb_" + Math.random().toString(36).slice(2);
+      params = { ...(params||{}), callback: cb };
+      const u = qs(url, params);
+      const s = document.createElement('script');
+      let settled=false;
+      const timer = setTimeout(()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Timeout JSONP: " + u)); }, timeoutMs);
+      function cleanup(){ clearTimeout(timer); if (s.parentNode) s.parentNode.removeChild(s); try{ delete window[cb]; }catch(_){ } }
+      window[cb] = (data)=>{ if(settled) return; settled=true; cleanup(); resolve({data, url:u}); };
+      s.src = u; s.onerror = ()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Error de script JSONP: " + u)); };
+      document.head.appendChild(s);
+    });
+  }
+  function resolveFieldName(layerMeta, candidates){
+    const fields = (layerMeta && layerMeta.fields) || [];
+    const wanted = candidates.map(s => String(s).toLowerCase());
+    for(const f of fields){
+      const n = (f.name||"").toLowerCase();
+      const a = (f.alias||"").toLowerCase();
+      if (wanted.includes(n) || (a && wanted.includes(a))) return f.name;
+    }
+    return null;
+  }
+
+  // ==== motor responsivo
+  function responsiveMetrics(){
+    const w = Math.max(320, shell.clientWidth || 320);
+    const h = Math.max(300, shell.clientHeight || 300);
+    const f = Math.min(Math.max(w/900, 0.7), 1.25);
+    const fh = Math.min(Math.max(h/600, 0.75), 1.25);
+
+    const legendFont = Math.round(12 * f);
+    const axisFont = Math.round(11 * f);
+    const labelFont = Math.round(12 * f);
+
+    const top = Math.round( h < 420 ? 58*fh : 66*fh );
+    const bottom = Math.round( h < 420 ? 64*fh : 80*fh );
+    const left = Math.round( Math.min(110, 90*f) );
+    const right = Math.round( Math.min(60, 40*f) );
+
+    const showPointLabels = w >= 760; // solo para líneas
+
+    const legendMaxWidth = Math.round(w * 0.88);
+
+    return { legendFont, axisFont, labelFont, top, bottom, left, right, showPointLabels, legendMaxWidth };
+  }
+
+  // ==== chart base
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', onResize);
+  const ro = new ResizeObserver(onResize);
+  ro.observe(shell);
+
+  let _seriesSaved = null;
+
+  function baseOptionFactory(){
+    const m = responsiveMetrics();
+    return {
+      backgroundColor: '#ffffff',
+      grid: { left: m.left, right: m.right, top: m.top, bottom: m.bottom, containLabel: true },
+      legend: {
+        type: 'scroll',
+        top: 10,
+        left: 'center',
+        itemWidth: 18, itemHeight: 10, icon: 'roundRect',
+        textStyle: { fontSize: m.legendFont },
+        width: m.legendMaxWidth,
+        formatter: (name)=> (String(name).toUpperCase()==="NACIONAL" ? "TOTAL" : name)
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line' },
+        confine: true,
+        appendToBody: true,
+        formatter: (params)=>{
+          const opt = chart.getOption();
+          const year = params?.[0]?.axisValue ?? '';
+          const lines = [`<b>${year}</b>`];
+          (params||[]).forEach(p=>{
+            const serOpt = opt.series[p.seriesIndex] || {};
+            const flagMap = serOpt._flagByYear || {};
+            const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
+            const displayName = (String(p.seriesName).toUpperCase()==="NACIONAL") ? "TOTAL" : p.seriesName;
+
+            const vTxt = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%${flagSuf}`;
+
+            const recMap = serOpt._recByYear || {};
+            const rec = recMap[String(year)];
+            const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}${flagSuf}`;
+
+            lines.push(`${p.marker} ${displayName}: <b>${vTxt}</b>${recTxt}`);
+          });
+          return lines.join('<br/>');
+        }
+      },
+      xAxis: {
+        type:'category', boundaryGap:true, name:'Años', nameLocation:'middle',
+        nameGap:34, axisTick:{alignWithLabel:true},
+        axisLabel:{margin:14, fontSize: m.axisFont},
+        animation:false, data:[]
+      },
+      yAxis: {
+        type:'value', name:'% Acceso a agua',
+        nameTextStyle: { fontSize: m.axisFont },
+        axisLabel:{ formatter:v=>nf1.format(v), margin:12, fontSize: m.axisFont },
+        splitLine:{show:true}, scale:true
+      },
+      animation: true,
+      animationDuration: 1600,
+      animationDurationUpdate: 1600,
+      series: [],
+      graphic: []
+    };
+  }
+
+  // Etiquetas responsivas: arriba para barras, abajo para líneas
+  function applyResponsiveLabels(series){
+    const m = responsiveMetrics();
+    return series.map(s=>({
+      label:{
+        show: (s.type === 'bar') ? true : m.showPointLabels,
+        position: (s.type === 'bar') ? 'top' : 'bottom',
+        distance: (s.type === 'bar') ? 6 : 4,
+        fontSize:m.labelFont,
+        color:'#111827',
+        formatter:(p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)}%`
+      },
+      // En barras NO ocultamos por solape para que siempre queden arriba
+      labelLayout:{ hideOverlap: (s.type === 'bar') ? false : true }
+    }));
+  }
+
+  function onResize(){
+    if(shell.getBoundingClientRect().height > 50){
+      shell.setAttribute('data-autoheight', '0');
+    }
+    const opt = chart.getOption();
+    const m = responsiveMetrics();
+    chart.resize();
+    chart.setOption({
+      grid: { left: m.left, right: m.right, top: m.top, bottom: m.bottom, containLabel: true },
+      legend: { textStyle:{fontSize: m.legendFont}, top: 10, width: m.legendMaxWidth },
+      xAxis: [{...opt.xAxis?.[0], axisLabel:{...(opt.xAxis?.[0]?.axisLabel||{}), fontSize: m.axisFont}}],
+      yAxis: [{...opt.yAxis?.[0], nameTextStyle:{fontSize: m.axisFont}, axisLabel:{...(opt.yAxis?.[0]?.axisLabel||{}), fontSize: m.axisFont}}]
+    });
+    if(_seriesSaved){
+      chart.setOption({ series: applyResponsiveLabels(_seriesSaved) });
+    }
+  }
+
+  let tableUrl = null;
+  let fields = {};
+
+  async function initMeta(){
+    const meta = await jsonp(SERVICE, { f: "pjson" });
+    const tables = (meta.data && meta.data.tables) || [];
+    const layers = (meta.data && meta.data.layers) || [];
+    const all = [...tables, ...layers];
+    const found =
+      all.find(t => t && t.name && String(t.name).toLowerCase().includes(TARGET_TABLE_NAME.toLowerCase())) ||
+      all.find(t => t && t.name && String(t.name).toLowerCase().includes("tb_indicadores_serie"));
+    if (!found) throw new Error("No se encontró la tabla objetivo en el servicio.");
+    tableUrl = SERVICE + "/" + found.id;
+
+    const info = await jsonp(tableUrl, { f:"pjson" });
+    fields = {
+      anio  : resolveFieldName(info.data, ["anio"]),
+      ambito: resolveFieldName(info.data, ["ambito"]),
+      valor : resolveFieldName(info.data, ["valor_porcentaje","valor porcentaje","valor_porcentual"]),
+      region: resolveFieldName(info.data, ["region"]),
+      ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
+      dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
+      rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"])
+    };
+    if(!fields.anio || !fields.ambito || !fields.valor || !fields.region || !fields.ind || !fields.dvals){
+      throw new Error("Campos requeridos no hallados.");
+    }
+  }
+
+  function backGraphic(color, onClick){
+    const stroke = color;
+    const size = Math.round(20 * Math.min(Math.max(shell.clientWidth/900,0.7),1.25));
+    const cx = size, cy = size, r = size;
+    return [{
+      type: 'group',
+      left: 10, top: 10, z: 100,
+      bounding: 'all',
+      cursor: 'pointer',
+      onclick: onClick,
+      children: [
+        {type:'circle', shape:{cx:cx, cy:cy, r:r}, style:{fill:'#fff', stroke:stroke, lineWidth:2, shadowBlur:6, shadowColor:'rgba(0,0,0,.08)'}},
+        {type:'polyline', shape:{points:[[cx+4,cy-8],[cx-8,cy],[cx+4,cy+8]]}, style:{stroke:stroke, lineWidth:3, lineCap:'round', lineJoin:'round'}}
+      ]
+    }];
+  }
+
+  // ========= Línea (NACIONAL) =========
+  async function loadLine(){
+    const baseOpt = baseOptionFactory();
+    chart.clear();
+    chart.setOption(baseOpt);
+
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
+
+    const where =
+      `UPPER(${region})='${REGION_TOTAL}' AND ` +
+      `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
+      `UPPER(${dvals})=UPPER('${D_VALORES}')`;
+
+    const outFields = [anio,ambito,valor,rec].concat(flag?[flag]:[]).join(",");
+
+    const res = await jsonp(tableUrl + "/query", {
+      where,
+      outFields,
+      orderByFields: `${anio} ASC, ${ambito} ASC`,
+      returnGeometry: "false",
+      f: "json"
+    }, 20000);
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error("La consulta no devolvió filas.");
+
+    const raw = features.map(f=>f.attributes)
+      .filter(r => r && r[anio] != null && r[ambito] != null && r[valor] != null)
+      .map(r => ({
+        anio: Number(r[anio]),
+        ambito: normalizeAmb(r[ambito]),
+        valor: Number(r[valor]),
+        recuento: (r[rec]!=null ? Number(r[rec]) : null),
+        flag: flag ? cleanFlag(r[flag]) : ''
+      }));
+
+    const maxRaw = Math.max(...raw.map(r=>r.valor));
+    const scale = (maxRaw <= 1.5) ? 100 : 1;
+    raw.forEach(r => r.valor = r.valor * scale);
+
+    const agg = new Map();
+    raw.forEach(r=>{
+      const key = r.ambito + "|" + r.anio;
+      const cur = agg.get(key) || { sum:0, count:0, rec:0, flags:new Set() };
+      cur.sum += r.valor; cur.count += 1;
+      if(r.recuento!=null && !isNaN(r.recuento)) cur.rec += r.recuento;
+      if(r.flag) cur.flags.add(r.flag);
+      agg.set(key, cur);
+    });
+    const rows = Array.from(agg.entries()).map(([key, o])=>{
+      const [amb, an] = key.split("|");
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec, flag: Array.from(o.flags).join('') };
+    });
+
+    const years = Array.from(new Set(rows.map(r=>r.anio))).sort((a,b)=>a-b).map(String);
+
+    const byAmb = {};
+    rows.forEach(r => { (byAmb[r.ambito] ||= []).push(r); });
+
+    const seriesPrep = [];
+    Object.entries(byAmb).forEach(([amb, arr])=>{
+      const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
+      const mRec = new Map(arr.map(o=>[String(o.anio), o.recuento]));
+      const mFlg = new Map(arr.map(o=>[String(o.anio), o.flag]));
+      const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
+      const valid = data.filter(v=>v!=null);
+      const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
+      const recByYear = {}; years.forEach(y=>{ if(mRec.has(y)) recByYear[y] = Number(mRec.get(y)); });
+      const flagByYear= {}; years.forEach(y=>{ const fv = mFlg.get(y); if(fv) flagByYear[y] = fv; });
+      seriesPrep.push({ name: amb, data, mean, recByYear, flagByYear });
+    });
+
+    const prefer = ["NACIONAL","TOTAL","URBANO","RURAL"];
+    seriesPrep.sort((a,b)=>{
+      const ai = prefer.indexOf(a.name), bi = prefer.indexOf(b.name);
+      if(ai!==-1 || bi!==-1){
+        if(ai===-1) return 1;
+        if(bi===-1) return -1;
+        return ai-bi;
+      }
+      return (b.mean||0)-(a.mean||0);
+    });
+
+    const n = Math.max(1, seriesPrep.length);
+    const minL = Math.max(18, baseHSL.l - 12);
+    const maxL = Math.min(85, baseHSL.l + 26);
+    const stepL = (i)=> Math.round(minL + (maxL - minL) * (i/(n-1 || 1)));
+
+    const series = seriesPrep.map((s,i)=>{
+      const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
+      const isTotal  = (s.name==="TOTAL" || s.name==="NACIONAL");
+      const isUrbano = s.name==="URBANO";
+      const isRural  = s.name==="RURAL";
+      const lineType = isTotal ? 'solid' : (isUrbano ? 'dashed' : (isRural ? 'dotted' : 'solid'));
+      return {
+        name: s.name, type:'line', smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+        lineStyle:{ width:2, color:col, type:lineType }, itemStyle:{ color:col },
+        emphasis:{ focus:'series', scale:false }, clip:true, data:s.data,
+        _color: col, _recByYear:s.recByYear, _flagByYear:s.flagByYear
+      };
+    });
+
+    const names = series.map(s=>s.name);
+    const legendData = [];
+    if (names.includes("NACIONAL")) legendData.push("NACIONAL");
+    else if (names.includes("TOTAL")) legendData.push("TOTAL");
+    if (names.includes("URBANO"))  legendData.push("URBANO");
+    if (names.includes("RURAL"))   legendData.push("RURAL");
+    names.forEach(n=>{ if(!legendData.includes(n)) legendData.push(n); });
+
+    const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const pad = Math.max((max - min) * 0.10, 0.8);
+    const extraBottom = Math.max((max - min) * 0.03, 0.25);
+    const yMin = Math.floor((min - pad - extraBottom) * 10)/10;
+    const yMax = Math.ceil ((max + pad) * 10)/10;
+
+    _seriesSaved = series;
+
+    const baseOpt2 = baseOptionFactory();
+    chart.setOption({
+      ...baseOpt2,
+      xAxis: { ...baseOpt2.xAxis, data: years },
+      yAxis: { ...baseOpt2.yAxis, min: yMin, max: yMax, name: '% Acceso a agua' },
+      legend: { ...baseOpt2.legend, data: legendData },
+      series
+    });
+
+    let labelsApplied = false;
+    chart.off('finished');
+    chart.on('finished', ()=>{
+      if(labelsApplied) return; labelsApplied = true;
+      chart.setOption({ series: applyResponsiveLabels(series) });
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='line'){
+        const year = String(ev.name);
+        const amb  = normalizeAmb(ev.seriesName);
+        const color= (chart.getOption().series[ev.seriesIndex]._color) || '#3b82f6';
+        loadBars({year, amb, color}).catch(showErr);
+      }
+    });
+
+    onResize();
+  }
+
+  // ========= Barras (DRILLDOWN) =========
+  async function loadBars({year, amb, color}){
+    const baseOpt = baseOptionFactory();
+    chart.clear();
+    chart.setOption({ ...baseOpt, legend: { show:false } });
+
+    const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
+
+    const where =
+      `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
+      `UPPER(${dvals})=UPPER('${D_VALORES}') AND ` +
+      `${anio}=${Number(year)} AND ` +
+      `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
+      `UPPER(${ambito}) LIKE '%${amb}%'`;
+
+    const outFields = [region,valor,ambito,rec].concat(flag?[flag]:[]).join(",");
+
+    const res = await jsonp(tableUrl + "/query", {
+      where, outFields, orderByFields: `${region} ASC`,
+      returnGeometry: "false", f: "json"
+    }, 20000);
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${amb} en ${year}.`);
+
+    const tmp = new Map();
+    features.forEach(f=>{
+      const r = f.attributes;
+      const reg = String(r[region]);
+      const v   = Number(r[valor]);
+      const rc  = (r[rec]!=null ? Number(r[rec]) : null); // miles
+      const flg = flag ? cleanFlag(r[flag]) : '';
+      const it = tmp.get(reg) || { sum:0, c:0, rec:0, flags:new Set() };
+      it.sum += v; it.c += 1;
+      if(rc!=null && !isNaN(rc)) it.rec += rc;
+      if(flg) it.flags.add(flg);
+      tmp.set(reg, it);
+    });
+
+    let rows = Array.from(tmp.entries()).map(([reg, o])=>({
+      region: reg,
+      valor: o.sum / o.c,
+      recuento: o.rec,
+      flag: Array.from(o.flags).join('')
+    }));
+
+    const maxRaw = Math.max(...rows.map(r=>r.valor));
+    const scale = (maxRaw <= 1.5) ? 100 : 1;
+    rows.forEach(r => r.valor = r.valor * scale);
+    rows.sort((a,b)=>b.valor-a.valor);
+
+    const x = rows.map(r=>r.region);
+    const y = rows.map(r=>r.valor);
+    const recs  = rows.map(r=>r.recuento);
+    const flags = rows.map(r=>r.flag||'');
+
+    const m = responsiveMetrics();
+    const rotate = (x.length>22?50:(x.length>15?35:(x.length>10?20:0)));
+
+    // === yMax con holgura para etiquetas arriba ===
+    const yMaxData = Math.max(...y.filter(v=>isFinite(v)));
+    const yMaxPad  = yMaxData >= 96 ? yMaxData + 4 : yMaxData * 1.06;
+
+    chart.setOption({
+      title: { left: 'center', top: 10, text: `Acceso a agua — ${amb} — ${year}`, textStyle:{fontSize: m.legendFont+1} },
+      xAxis: { type:'category', data: x, axisLabel:{ interval:0, rotate, fontSize:m.axisFont } },
+      yAxis: { type:'value', name:'% Acceso a agua', axisLabel:{ formatter:v=>nf1.format(v), fontSize:m.axisFont }, scale:true, max: yMaxPad },
+      series: [{
+        name: 'Región',
+        type: 'bar',
+        data: y,
+        itemStyle: { color: color },
+        label: {
+          show: true,                 // SIEMPRE visibles
+          position:'top',             // SIEMPRE arriba
+          distance: 6,
+          formatter:(p)=>`${nf1.format(+p.value)}%`,
+          fontSize: m.labelFont,
+          color:'#111827'
+        },
+        labelLayout:{ hideOverlap: false } // NO ocultar
+      }],
+      graphic: backGraphic(color, async ()=>{ try { await loadLine(); } catch(e){ showErr(e); } })
+    });
+
+    document.onkeydown = async (e)=>{
+      if(e.key === 'Escape'){
+        document.onkeydown = null;
+        await loadLine().catch(showErr);
+      }
+    };
+
+    _seriesSaved = chart.getOption().series; // para re-aplicar labels en resize (manteniendo 'top' en barras)
+    onResize();
+  }
+
+  // ==== flujo
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  (async function run(){
+    try{
+      if(shell.clientHeight > 50) shell.setAttribute('data-autoheight','0');
+      $loading.style.display = 'flex';
+      await initMeta();
+      await loadLine();
+      $loading.style.display = 'none';
+      $err.style.display = 'none';
+      $err.textContent = '';
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{
+    showErr(ev && ev.message ? ev.message : ev);
+  }, true);
+})();
+</script>
+</body>
+</html>
