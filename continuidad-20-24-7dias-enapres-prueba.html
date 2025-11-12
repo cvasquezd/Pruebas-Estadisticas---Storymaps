@@ -423,7 +423,7 @@
       title:{ left:'center', top:10, text:`Porcentaje — ${ambForRegions} — ${year}` },
       xAxis:{ type:'category', data:x,
               axisLabel:{ interval:0, rotate:(x.length>22?50:(x.length>15?35:(x.length>10?20:0))), fontSize: responsiveMetrics().axisFont } },
-      yAxis:{ type:'value', name:'Pob. con Continuidad (%)', axisLabel:{ formatter:v=>nf1.format(v), fontSize: responsiveMetrics().axisFont }, min:0, max:100, scale:false },
+      yAxis:{ type:'value', name:'Pob. Continuidad (%)', axisLabel:{ formatter:v=>nf1.format(v), fontSize: responsiveMetrics().axisFont }, min:0, max:100, scale:false },
       series:[{
         name:'Región',
         type:'bar',
