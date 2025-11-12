@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Continuidad del servicio de agua por red pública en los hogares (horas/día)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{ --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08); }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+    h1{font-weight:700;font-size:20px;margin:0 0 6px;text-align:center}
+    .sub{color:var(--muted);font-size:12px;margin:0 0 14px;text-align:center}
+
+    /* Contenedor del gráfico */
+    #chart{height:70vh;min-height:460px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);position:relative}
+
+    /* ===== Ajuste automático cuando se incrusta (StoryMaps / Sidecar / iframe) ===== */
+    body.embed.storymaps #chart{ height:clamp(560px,72vh,920px); min-height:560px; }
+    body.embed.generic  #chart{ height:clamp(480px,70vh,880px); min-height:480px; }
+
+    #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Continuidad del servicio de agua por red pública en los hogares (horas/día)</h1>
+  <p class="sub">Fuente: ENAPRES</p>
+  <div id="chart"><div id="loading">Cargando datos…</div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  /* ====== Detección de EMBED (StoryMaps/Sidecar/iframe) y auto-alto ====== */
+  const EMBED = (()=>{ try{ return window.self !== window.top; }catch(_){ return true; } })();
+  const REF = (document.referrer||"") + " " + (window.location.ancestorOrigins ? Array.from(window.location.ancestorOrigins).join(" ") : "");
+  const IS_STORYMAP = /storymaps|arcgis\.com/i.test(REF);
+  if(EMBED){
+    document.body.classList.add('embed');
+    document.body.classList.add(IS_STORYMAP ? 'storymaps' : 'generic');
+  }
+  /* Fin detección */
+
+  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
+  const TARGET_TABLE_NAME = "bd_geovivienda.ogei.tb_indicadores_serie";
+  const INDICADOR_OBJ = "Ind_13";           // id_indicador solicitado
+  const REGION_TOTAL = "NACIONAL";
+
+  const nf1 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  // ==== util colores
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){
+    const m = hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b); let h,s,l=(max+min)/2;
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}
+      h/=6;
+    }
+    return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
+  }
+  function hsl(h,s,l,a=1){ return `hsla(${h} ${s}% ${l}% / ${a})`; }
+  const baseHSL = hexToHsl(BASE_HEX);
+  const normalize = (s)=> String(s||'').replace(/\s+/g,' ').trim();
+  const up = (s)=> normalize(s).toUpperCase();
+  const cleanFlag = (v)=> {
+    const t = String(v==null?'':v).trim();
+    return t ? t : '';
+  };
+
+  // ==== helpers DOM
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+
+  // ==== helpers net
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  function jsonp(url, params, timeoutMs=15000){
+    return new Promise((resolve, reject)=>{
+      const cb = "__arcgis_cb_" + Math.random().toString(36).slice(2);
+      params = { ...(params||{}), callback: cb };
+      const u = qs(url, params);
+      const s = document.createElement('script');
+      let settled=false;
+      const timer = setTimeout(()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Timeout JSONP: " + u)); }, timeoutMs);
+      function cleanup(){ clearTimeout(timer); if (s.parentNode) s.parentNode.removeChild(s); try{ delete window[cb]; }catch(_){ } }
+      window[cb] = (data)=>{ if(settled) return; settled=true; cleanup(); resolve({data, url:u}); };
+      s.src = u; s.onerror = ()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Error de script JSONP: " + u)); };
+      document.head.appendChild(s);
+    });
+  }
+  function resolveFieldName(layerMeta, candidates){
+    const fields = (layerMeta && layerMeta.fields) || [];
+    const wanted = candidates.map(s => String(s).toLowerCase());
+    for(const f of fields){
+      const n = (f.name||"").toLowerCase();
+      const a = (f.alias||"").toLowerCase();
+      if (wanted.includes(n) || (a && wanted.includes(a))) return f.name;
+    }
+    return null;
+  }
+
+  // Flecha volver (overlay)
+  function backGraphic(color, onClick){
+    const stroke = color || '#111827';
+    return [{
+      type: 'group',
+      left: 10, top: 10, z: 100,
+      bounding: 'all',
+      cursor: 'pointer',
+      onclick: onClick,
+      children: [
+        {type:'circle', shape:{cx:18, cy:18, r:18}, style:{fill:'#fff', stroke:stroke, lineWidth:2, shadowBlur:6, shadowColor:'rgba(0,0,0,.08)'}},
+        {type:'polyline', shape:{points:[[22,10],[14,18],[22,26]]}, style:{stroke:stroke, lineWidth:3, lineCap:'round', lineJoin:'round'}}
+      ]
+    }];
+  }
+
+  // ====== Ícono de leyenda como porción de línea (para líneas) ======
+  function makeLegendLineIcon(color, lineType){
+    const dash = lineType==='dashed' ? '8,6' : (lineType==='dotted' ? '2,6' : '');
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="12" viewBox="0 0 44 12">
+         <path d="M3 6 H41" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"
+               ${dash ? `stroke-dasharray="${dash}"` : ''}/>
+       </svg>`;
+    return 'image://data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  }
+
+  // ==== chart base (mantiene animación exacta de tu código)
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', ()=>chart.resize());
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
+    legend: {
+      top: 12, left: 'center', itemWidth: 18, itemHeight: 10, icon: 'roundRect', textStyle: { fontSize: 12 }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: (params)=>{
+        const year = params?.[0]?.axisValue ?? '';
+        const opt = chart.getOption();
+        const lines = [`<b>${year}</b>`];
+        (params||[]).forEach(p=>{
+          const serOpt = opt.series[p.seriesIndex] || {};
+          const flagMap = serOpt._flagByYear || {};
+          const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
+          const v = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)} h${flagSuf}`;
+          lines.push(`${p.marker} ${p.seriesName}: <b>${v}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis: { type:'category', boundaryGap:true, name:'Años', nameLocation:'middle', nameGap:34, axisTick:{alignWithLabel:true}, axisLabel:{margin:14}, animation:false, data:[] },
+    yAxis: { type:'value', name:'Continuidad (h)', axisLabel:{ formatter:v=>nf1.format(v), margin:12 }, splitLine:{show:true}, scale:true },
+    animation: true,
+    animationDuration: 1600,
+    animationDurationUpdate: 1600,
+    series: [],
+    graphic: []
+  };
+  chart.setOption(baseOption);
+
+  // === estado / metadatos
+  let tableUrl = null;
+  let fields = {};
+  async function initMeta(){
+    const meta = await jsonp(SERVICE, { f: "pjson" });
+    const all = [...(meta.data.tables||[]), ...(meta.data.layers||[])];
+    const found =
+      all.find(t => t && t.name && up(t.name).includes(up(TARGET_TABLE_NAME))) ||
+      all.find(t => t && t.name && up(t.name).includes("TB_INDICADORES_SERIE"));
+    if (!found) throw new Error("No se encontró la tabla objetivo en el servicio.");
+    tableUrl = SERVICE + "/" + found.id;
+
+    const info = await jsonp(tableUrl, { f:"pjson" });
+    fields = {
+      anio  : resolveFieldName(info.data, ["anio"]),
+      ambito: resolveFieldName(info.data, ["ambito"]),
+      rec   : resolveFieldName(info.data, ["valor_recuento","recuento","conteo"]), // eje Y (horas)
+      region: resolveFieldName(info.data, ["region"]),
+      ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"])
+    };
+    if(!fields.anio || !fields.ambito || !fields.rec || !fields.region || !fields.ind){
+      throw new Error("Campos requeridos no hallados (revise 'valor_recuento').");
+    }
+  }
+
+  // ========= LÍNEAS (region=NACIONAL; ambito TOTAL/URBANO/RURAL/NACIONAL) =========
+  async function loadLine(){
+    const {anio, ambito, rec, region, ind, flag} = fields;
+
+    const where =
+      `UPPER(${region})='${REGION_TOTAL}' AND ` +
+      `UPPER(${ind})=UPPER('${INDICADOR_OBJ}')`;
+
+    const outFields = [anio,ambito,rec].concat(flag?[flag]:[]).join(",");
+
+    const res = await jsonp(tableUrl + "/query", {
+      where,
+      outFields,
+      orderByFields: `${anio} ASC, ${ambito} ASC`,
+      returnGeometry: "false",
+      f: "json"
+    }, 20000);
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error("La consulta no devolvió filas.");
+
+    const raw = features.map(f=>f.attributes)
+      .filter(r => r && r[anio] != null && r[ambito] != null && r[rec] != null)
+      .map(r => ({
+        anio: Number(r[anio]),
+        ambito: up(r[ambito]),
+        valor: Number(r[rec]),
+        flag: flag ? cleanFlag(r[flag]) : ''
+      }));
+
+    // agregación (ambito, anio) — promedio y consolidación de flags
+    const agg = new Map();
+    raw.forEach(r=>{
+      const key = r.ambito + "|" + r.anio;
+      const cur = agg.get(key) || { sum:0, count:0, flags:new Set() };
+      cur.sum += r.valor; cur.count += 1;
+      if(r.flag) cur.flags.add(r.flag);
+      agg.set(key, cur);
+    });
+    const rows = Array.from(agg.entries()).map(([key, o])=>{
+      const [amb, an] = key.split("|");
+      return { ambito: amb, anio: Number(an), valor: o.sum / o.count, flag: Array.from(o.flags).join('') };
+    });
+
+    // Incluir TOTAL también
+    const VALID = new Set(['TOTAL','URBANO','RURAL','NACIONAL']);
+    const filtered = rows.filter(r => VALID.has(r.ambito));
+
+    const years = Array.from(new Set(filtered.map(r=>r.anio))).sort((a,b)=>a-b).map(String);
+    const byAmb = {};
+    filtered.forEach(r => { (byAmb[r.ambito] ||= []).push(r); });
+
+    const seriesPrep = [];
+    Object.entries(byAmb).forEach(([ambito, arr])=>{
+      const mVal = new Map(arr.map(o=>[String(o.anio), o.valor]));
+      const mFlg = new Map(arr.map(o=>[String(o.anio), o.flag]));
+      const data = years.map(y => (mVal.has(y) ? Number(mVal.get(y)) : null));
+      const valid = data.filter(v=>v!=null);
+      const mean = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : 0;
+      const flagByYear = {}; years.forEach(y=>{ const fv = mFlg.get(y); if(fv) flagByYear[y] = fv; });
+      seriesPrep.push({ name: ambito, data, mean, flagByYear });
+    });
+
+    // Orden: TOTAL → URBANO → RURAL → NACIONAL
+    const prefer = ["TOTAL","URBANO","RURAL","NACIONAL"];
+    seriesPrep.sort((a,b)=>{
+      const ai = prefer.indexOf(a.name), bi = prefer.indexOf(b.name);
+      if(ai!==-1 || bi!==-1){
+        if(ai===-1) return 1;
+        if(bi===-1) return -1;
+        return ai-bi;
+      }
+      return (b.mean||0)-(a.mean||0);
+    });
+
+    // colores/estilos de línea (sin cambiar animaciones)
+    const n = Math.max(1, seriesPrep.length);
+    const minL = Math.max(18, baseHSL.l - 12);
+    const maxL = Math.min(85, baseHSL.l + 26);
+    const stepL = (i)=> Math.round(minL + (maxL - minL) * (i/(n-1 || 1)));
+
+    const series = seriesPrep.map((s,i)=>{
+      const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
+      const name = s.name;
+      const lineType =
+        name==="TOTAL"   ? 'solid'  :
+        name==="URBANO"  ? 'dashed' :
+        name==="RURAL"   ? 'dotted' :
+        name==="NACIONAL" ? 'solid'  : 'solid';
+      return {
+        name,
+        type: 'line',
+        smooth: true,
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2, color: col, type: lineType },
+        itemStyle: { color: col },
+        emphasis: { focus: 'series', scale: false },
+        clip: true,
+        data: s.data,
+        _color: col,
+        _lineType: lineType,
+        _flagByYear: s.flagByYear
+      };
+    });
+
+    // Leyenda con “porción de línea” (sin mover posición)
+    const legendData = series.map(s => ({
+      name: s.name,
+      icon: makeLegendLineIcon(s._color, s._lineType)
+    }));
+
+    const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const pad = Math.max((max - min) * 0.10, 0.5);
+    const extraBottom = Math.max((max - min) * 0.03, 0.1);
+    const yMin = Math.floor((min - pad - extraBottom) * 10)/10;
+    const yMax = Math.ceil ((max + pad) * 10)/10;
+
+    chart.clear();
+    chart.setOption({
+      ...baseOption,                            // ← mantiene animación global de tu código
+      xAxis: { ...baseOption.xAxis, data: years },
+      yAxis: { ...baseOption.yAxis, min: yMin, max: yMax, name: 'Continuidad (h)' },
+      legend: { ...baseOption.legend, data: legendData },  // ← íconos de línea
+      series,
+      graphic: []
+    });
+
+    // etiquetas (se mantienen tal cual tu lógica: tras 'finished')
+    let labelsShown = false;
+    chart.off('finished');
+    chart.on('finished', ()=>{
+      if(labelsShown) return; labelsShown = true;
+      chart.setOption({
+        series: series.map(()=>({
+          label:{
+            show:true, position:'bottom', distance:4, fontSize:12, color:'#111827',
+            formatter:(p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)} h`
+          },
+          labelLayout:{ hideOverlap: true }
+        }))
+      });
+    });
+
+    // click -> drilldown
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='line'){
+        const year = String(ev.name);
+        const amb  = up(ev.seriesName);
+        const color= (chart.getOption().series[ev.seriesIndex]._color) || '#3b82f6';
+        loadBars({year, amb, color}).catch(showErr);
+      }
+    });
+
+    document.onkeydown = null;
+    $loading.style.display = 'none';
+    $err.style.display = 'none';
+    $err.textContent = '';
+  }
+
+  // ========= BARRAS (drilldown por región; usa valor_recuento en Y) =========
+  async function loadBars({year, amb, color}){
+    const {anio, ambito, rec, region, ind, flag} = fields;
+
+    // Mapeo: NACIONAL → TOTAL para consulta por regiones
+    const ambForRegions = (amb === 'NACIONAL') ? 'TOTAL' : amb;
+
+    const where =
+      `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND ` +
+      `${anio}=${Number(year)} AND ` +
+      `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
+      `UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
+
+    const outFields = [region,rec].concat(flag?[flag]:[]).join(",");
+
+    const res = await jsonp(tableUrl + "/query", {
+      where,
+      outFields,
+      orderByFields: `${region} ASC`,
+      returnGeometry: "false",
+      f: "json"
+    }, 20000);
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${ambForRegions} en ${year}.`);
+
+    const rows0 = features
+      .map(f=>f.attributes)
+      .filter(r => r && r[region] && r[rec]!=null)
+      .map(r => ({
+        region: normalize(r[region]),
+        valor : Number(r[rec]),
+        flag  : flag ? cleanFlag(r[flag]) : ''
+      }));
+
+    // agregar por región (promedio) + consolidación de flags
+    const agg = new Map();
+    for (const r of rows0){
+      const key = up(r.region);
+      const cur = agg.get(key) || { name: r.region, sum: 0, count: 0, flags: new Set() };
+      cur.sum += r.valor;
+      cur.count += 1;
+      if(r.flag) cur.flags.add(r.flag);
+      agg.set(key, cur);
+    }
+    const rows = Array.from(agg.values()).map(o => ({
+      region: o.name,
+      valor : o.sum / o.count,
+      flag  : Array.from(o.flags).join('')
+    }));
+    rows.sort((a,b)=>b.valor-a.valor);
+
+    const x = rows.map(r=>r.region);
+    const y = rows.map(r=>r.valor);
+    const flags = rows.map(r=>r.flag || '');
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor: '#ffffff',
+      grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
+      legend: { show:false },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type:'shadow' },
+        formatter: (params)=>{
+          const p = params && params[0];
+          if(!p) return '';
+          const idx = p.dataIndex;
+          const flagSuf = flags[idx] ? String(flags[idx]) : '';
+          const vTxt = `${nf1.format(+p.value)} h${flagSuf}`;
+          return `${p.axisValueLabel}<br><b>${vTxt}</b>`;
+        }
+      },
+      title: { left: 'center', top: 10, text: `Continuidad 20–24 h — ${ambForRegions} — ${year}` },
+      xAxis: { type:'category', data: x, axisLabel:{ interval:0, rotate: (x.length>18?40:(x.length>12?25:0)) } },
+      yAxis: { type:'value', name:'Continuidad (h)', axisLabel:{ formatter:v=>nf1.format(v) }, scale:true },
+      series: [{
+        name: 'Región',
+        type: 'bar',
+        data: y,
+        itemStyle: { color: color },
+        label: { show:true, position:'top', formatter:(p)=>`${nf1.format(+p.value)} h` }
+      }],
+      animation: true,
+      animationDuration: 1200,
+      graphic: backGraphic(color, async ()=>{
+        try{ await loadLine(); }catch(e){ showErr(e); }
+      })
+    });
+
+    // ESC para volver
+    document.onkeydown = async (e)=>{
+      if(e.key === 'Escape'){
+        document.onkeydown = null;
+        await loadLine().catch(showErr);
+      }
+    };
+
+    $loading.style.display = 'none';
+    $err.style.display = 'none';
+    $err.textContent = '';
+  }
+
+  // ==== flujo
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  (async function run(){
+    try{
+      $loading.style.display = 'flex';
+      await initMeta();
+      await loadLine();
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{
+    showErr(ev && ev.message ? ev.message : ev);
+  }, true);
+})();
+</script>
+</body>
+</html>
