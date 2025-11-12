@@ -6,21 +6,38 @@
   <title>Continuidad del servicio de agua por red pública en los hogares (horas/día)</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
+    *{box-sizing:border-box}
     :root{ --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08); }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow-x:hidden}
+
     #wrap{max-width:1100px;margin:18px auto;padding:0 14px}
     h1{font-weight:700;font-size:20px;margin:0 0 6px;text-align:center}
     .sub{color:var(--muted);font-size:12px;margin:0 0 14px;text-align:center}
 
     /* Contenedor del gráfico */
     #chart{height:70vh;min-height:460px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);position:relative}
-
-    /* ===== Ajuste automático cuando se incrusta (StoryMaps / Sidecar / iframe) ===== */
-    body.embed.storymaps #chart{ height:clamp(560px,72vh,920px); min-height:560px; }
-    body.embed.generic  #chart{ height:clamp(480px,70vh,880px); min-height:480px; }
-
     #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
     #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+
+    /* ===== Ajuste específico cuando está EMBED en StoryMaps/Sidecar/iframe ===== */
+    body.embed{overflow:hidden}                        /* evita scroll en el iframe */
+    body.embed #wrap{max-width:none}                   /* usa todo el ancho del iframe */
+
+    /* En StoryMaps, quitar márgenes/padding para que no “crezca” el alto total */
+    body.embed.storymaps #wrap{margin:0; padding:0}
+    body.embed.storymaps h1, 
+    body.embed.storymaps .sub {padding:0 10px}
+
+    /* Alto exacto al viewport del iframe, sin mínimos que disparen scroll */
+    body.embed.storymaps #chart{
+      height:100vh;        /* llena el alto disponible del iframe */
+      min-height:0;        /* desactiva el mínimo que forzaba scroll */
+      border-radius:12px;
+    }
+
+    /* Fallback genérico para otros iframes */
+    body.embed.generic #wrap{margin:0; padding:0 8px}
+    body.embed.generic #chart{height:100vh; min-height:0; border-radius:12px}
   </style>
 </head>
 <body>
@@ -33,13 +50,17 @@
 
 <script>
 (function(){
-  /* ====== Detección de EMBED (StoryMaps/Sidecar/iframe) y auto-alto ====== */
+  /* ====== Detección de EMBED (StoryMaps/Sidecar/iframe) y ajuste anti-scroll ====== */
   const EMBED = (()=>{ try{ return window.self !== window.top; }catch(_){ return true; } })();
   const REF = (document.referrer||"") + " " + (window.location.ancestorOrigins ? Array.from(window.location.ancestorOrigins).join(" ") : "");
   const IS_STORYMAP = /storymaps|arcgis\.com/i.test(REF);
   if(EMBED){
     document.body.classList.add('embed');
     document.body.classList.add(IS_STORYMAP ? 'storymaps' : 'generic');
+    // Ajuste fino: recalcular alto para dispositivos móviles y cambios de tamaño
+    const chartEl = document.getElementById('chart');
+    const fit = ()=>{ chartEl.style.height = window.innerHeight + 'px'; };
+    fit(); window.addEventListener('resize', fit);
   }
   /* Fin detección */
 
@@ -193,7 +214,7 @@
     }
   }
 
-  // ========= LÍNEAS (region=NACIONAL; ambito TOTAL/URBANO/RURAL/NACIONAL) =========
+  // ========= LÍNEAS =========
   async function loadLine(){
     const {anio, ambito, rec, region, ind, flag} = fields;
 
@@ -223,7 +244,6 @@
         flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // agregación (ambito, anio) — promedio y consolidación de flags
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
@@ -237,7 +257,6 @@
       return { ambito: amb, anio: Number(an), valor: o.sum / o.count, flag: Array.from(o.flags).join('') };
     });
 
-    // Incluir TOTAL también
     const VALID = new Set(['TOTAL','URBANO','RURAL','NACIONAL']);
     const filtered = rows.filter(r => VALID.has(r.ambito));
 
@@ -256,7 +275,6 @@
       seriesPrep.push({ name: ambito, data, mean, flagByYear });
     });
 
-    // Orden: TOTAL → URBANO → RURAL → NACIONAL
     const prefer = ["TOTAL","URBANO","RURAL","NACIONAL"];
     seriesPrep.sort((a,b)=>{
       const ai = prefer.indexOf(a.name), bi = prefer.indexOf(b.name);
@@ -268,8 +286,9 @@
       return (b.mean||0)-(a.mean||0);
     });
 
-    // colores/estilos de línea (sin cambiar animaciones)
     const n = Math.max(1, seriesPrep.length);
+    const baseHSL = (function hexToHsl(hex){const m=hex.replace('#','');const r=parseInt(m.slice(0,2),16)/255,g=parseInt(m.slice(2,4),16)/255,b=parseInt(m.slice(4,6),16)/255;const max=Math.max(r,g,b),min=Math.min(r,g,b);let h,s,l=(max+min)/2;if(max===min){h=s=0;}else{const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}h/=6;}return {h:Math.round(h*360),s:Math.round(s*100),l:Math.round(l*100)}})(BASE_HEX);
+    const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
     const minL = Math.max(18, baseHSL.l - 12);
     const maxL = Math.min(85, baseHSL.l + 26);
     const stepL = (i)=> Math.round(minL + (maxL - minL) * (i/(n-1 || 1)));
@@ -300,7 +319,6 @@
       };
     });
 
-    // Leyenda con “porción de línea” (sin mover posición)
     const legendData = series.map(s => ({
       name: s.name,
       icon: makeLegendLineIcon(s._color, s._lineType)
@@ -315,15 +333,15 @@
 
     chart.clear();
     chart.setOption({
-      ...baseOption,                            // ← mantiene animación global de tu código
+      ...baseOption,
       xAxis: { ...baseOption.xAxis, data: years },
       yAxis: { ...baseOption.yAxis, min: yMin, max: yMax, name: 'Continuidad (h)' },
-      legend: { ...baseOption.legend, data: legendData },  // ← íconos de línea
+      legend: { ...baseOption.legend, data: legendData },  // porción de línea
       series,
       graphic: []
     });
 
-    // etiquetas (se mantienen tal cual tu lógica: tras 'finished')
+    // etiquetas tras animación (igual que tu código)
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -356,11 +374,9 @@
     $err.textContent = '';
   }
 
-  // ========= BARRAS (drilldown por región; usa valor_recuento en Y) =========
+  // ========= BARRAS =========
   async function loadBars({year, amb, color}){
     const {anio, ambito, rec, region, ind, flag} = fields;
-
-    // Mapeo: NACIONAL → TOTAL para consulta por regiones
     const ambForRegions = (amb === 'NACIONAL') ? 'TOTAL' : amb;
 
     const where =
@@ -391,7 +407,6 @@
         flag  : flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // agregar por región (promedio) + consolidación de flags
     const agg = new Map();
     for (const r of rows0){
       const key = up(r.region);
@@ -446,7 +461,6 @@
       })
     });
 
-    // ESC para volver
     document.onkeydown = async (e)=>{
       if(e.key === 'Escape'){
         document.onkeydown = null;
