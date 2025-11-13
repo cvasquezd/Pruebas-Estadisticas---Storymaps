@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Evolución de Principales Indicadores de Saneamiento</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  :root{
+    /* Deben coincidir con el grid del chart */
+    --grid-left-px: 40px;
+    --grid-right-px: 140px;
+    --grid-bottom-px: 64px;
+  }
+
+  html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
+  #wrap{min-height:100vh;display:flex;flex-direction:column}
+
+  .page-header{padding:12px 10px 6px;text-align:center}
+  .page-header h1{margin:0;font-size:16px;font-weight:700;color:#111827}
+
+  /* ===== Barra superior alineada al grid ===== */
+  .topbar{
+    /* ancho exacto del área de ploteo: 100% - (left+right del grid) */
+    margin: 8px var(--grid-right-px) 6px var(--grid-left-px);
+    display:grid;
+    grid-template-columns: 1fr auto; /* col izquierda + col derecha (controles) */
+    align-items:center;
+    gap:10px;
+  }
+  .topbar-center{
+    /* centramos la leyenda sobre TODO el ancho del grid */
+    position:relative;
+    grid-column: 1 / span 2;
+    height:0;
+  }
+  .legend-box{
+    position:absolute; left:50%; transform:translateX(-50%);
+    display:inline-flex; align-items:center; gap:8px;
+    background:#fff; border:1px solid #e5e7eb; border-radius:14px;
+    padding:6px 10px; box-shadow:0 6px 18px rgba(0,0,0,.08);
+    font-size:12px; font-weight:600; color:#2563eb; user-select:none;
+  }
+  .legend-tip{
+    position:absolute; top:34px; left:50%; transform:translateX(-50%);
+    background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+    padding:10px 12px; min-width:220px; max-width:260px;
+    box-shadow:0 8px 24px rgba(0,0,0,.10); font-size:12px; color:#374151;
+    display:none; z-index:10;
+  }
+  .legend-box:hover + .legend-tip{ display:block; }
+  .lg-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .lg-chip{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.08)}
+  .muted{color:#6b7280}
+
+  .controls{
+    justify-self:end;
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    max-width:min(92vw, 760px);
+  }
+  .dd{ position:relative; }
+  .dd-trigger, .pill{
+    font-size:12px;font-weight:600;color:#111827;
+    background:#fff; border:1px solid #e5e7eb; border-radius:999px;
+    padding:4px 10px; cursor:pointer; user-select:none; white-space:nowrap;
+    box-shadow:0 6px 18px rgba(0,0,0,.04);
+  }
+  .dd-panel{
+    position:absolute; top:110%; right:0;
+    background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,.10);
+    padding:10px; min-width:240px; max-height:260px; overflow:auto; display:none; z-index:1000;
+  }
+  .dd.open .dd-panel{ display:block; }
+  .dd-search{ width:100%; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:8px; font-size:12px; }
+  .dd-list{ display:flex; flex-direction:column; gap:6px; }
+  .dd-row{ display:flex; align-items:center; gap:8px; font-size:12px; }
+  .dd-actions{ display:flex; justify-content:space-between; gap:8px; margin-bottom:8px; }
+
+  /* ===== Chart ===== */
+  #chart{
+    position:relative;
+    height: calc(100vh - 120px);
+    min-height:520px; width:100%;
+  }
+
+  @media (max-width:900px){
+    :root{ --grid-left-px: 30px; --grid-right-px: 110px; }
+    .dd-trigger, .pill{ padding:3px 8px; }
+  }
+  @media (max-width:640px){
+    :root{ --grid-left-px: 22px; --grid-right-px: 90px; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="page-header">
+    <h1>Evolución de Principales Indicadores de Saneamiento</h1>
+  </div>
+
+  <!-- Barra alineada al ancho del grid -->
+  <div class="topbar" id="topbar">
+    <div class="topbar-center">
+      <div class="legend-box" id="legendBtn">Leyenda</div>
+      <div class="legend-tip" id="legendTip" role="tooltip" aria-label="Leyenda de colores según avance devengado / PIM">
+        <div class="lg-row"><span class="lg-chip" style="background:#1dfc12"></span><span>Avance 67% – 100%</span></div>
+        <div class="lg-row"><span class="lg-chip" style="background:#ffb20f"></span><span>Avance 33% – &lt; 67%</span></div>
+        <div class="lg-row"><span class="lg-chip" style="background:#d00000"></span><span>Avance 0% – &lt; 33%</span></div>
+        <div class="lg-row"><span class="lg-chip" style="background:#9e9e9e"></span><span class="muted">Sin dato</span></div>
+      </div>
+    </div>
+
+    <div class="controls" id="controlsRight">
+      <div class="dd" id="regionDD">
+        <button class="dd-trigger" id="regionTrigger">Filtrar Departamentos</button>
+        <div class="dd-panel" id="regionPanel" role="listbox" aria-multiselectable="true">
+          <input class="dd-search" id="regionSearch" placeholder="Buscar departamento…"/>
+          <div class="dd-actions">
+            <button class="pill" id="selAll">Seleccionar todo</button>
+            <button class="pill" id="selNone">Limpiar</button>
+          </div>
+          <div class="dd-list" id="regionList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chart"></div>
+</div>
+
+<script>
+/* ===================== CONFIG/UTILS ===================== */
+const DOT_BORDER = { color:'#0f172a', width:0.1, type:'solid', opacity:0.90 };
+
+/* ========= Servicio / tabla ========= */
+const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/OGEI/Mapa_Inversiones_MEF/MapServer";
+const TABLE_ID = 3;
+const tableUrl = SERVICE + "/" + TABLE_ID;
+
+/* ========= Campos ========= */
+const F = {
+  anio : "ano_eje",
+  montopim: "monto_pim",
+  montodev: "monto_devengado",
+  dpto : "departamento_ejecutora_nombre",
+  prov : "provincia_ejecutora_nombre",
+  dist : "distrito_ejecutora_nombre",
+  funcion: "funcion_nombre"
+};
+
+const chart = echarts.init(document.getElementById('chart'));
+
+const norm = s => String(s ?? '').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'')
+  .replace(/\s+/g,' ')
+  .trim()
+  .toUpperCase();
+
+const toNum = v => {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  let s = String(v).trim().replace(/\s/g,'').replace('%','');
+  if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g,'.');
+  else if (s.includes(',') && s.includes('.')) s = s.replace(/,/g,'');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+const SMALL_WORDS = new Set(['de','del','la','las','el','los','y','e','o','u','al','da','do','das','dos']);
+function toTitleCaseEs(str){
+  const c = String(str||'').replace(/\s+/g,' ').trim().toLowerCase();
+  if(!c) return '';
+  return c.split(' ').map((w,i)=>(
+    i>0 && SMALL_WORDS.has(w)
+      ? w
+      : (w[0]?.toUpperCase()||'') + w.slice(1)
+  )).join(' ');
+}
+
+/* Colores según AVANCE (%) */
+function colorForAvance(p){
+  const v = Number(p);
+  if(!Number.isFinite(v)) return '#9e9e9e';
+  if(v < 33)  return '#d00000';   // rojo
+  if(v < 67)  return '#ffb20f';   // amarillo / naranja
+  return '#1dfc12';               // verde
+}
+
+function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+function extent(a){
+  let m=+Infinity,M=-Infinity;
+  for(const v of a) if(Number.isFinite(v)){ if(v<m)m=v; if(v>M)M=v; }
+  if(!Number.isFinite(m)||!Number.isFinite(M))return[0,1];
+  if(m===M)return[0,M||1];
+  return[m,M];
+}
+function quantile(a,q){
+  const s=a.slice().sort((x,y)=>x-y);
+  if(!s.length)return NaN;
+  const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);
+  return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo);
+}
+function makeSizeFn(values, minPx=18, maxPx=85){
+  const [mn,mx]=extent(values);
+  return x=>{
+    const v=Math.max(0,Number(x)||0);
+    let t=(mx>mn)?(v-mn)/(mx-mn):0.5;
+    t=Math.max(0,Math.min(1,t));
+    return minPx + Math.sqrt(t)*(maxPx-minPx);
+  };
+}
+
+/* ===================== DATA ===================== */
+async function fetchAllPaged(){
+  // Solo función "SANEAMIENTO" y registros con PIM/Dev no nulos
+  const where = `${F.funcion} = 'SANEAMIENTO' AND ${F.montopim} IS NOT NULL AND ${F.montodev} IS NOT NULL`;
+  let offset = 0, batch = 2000, all = [];
+  while(true){
+    const url = qs(`${tableUrl}/query`, {
+      where,
+      outFields: [F.anio,F.montopim,F.montodev,F.dpto,F.funcion].join(','),
+      returnGeometry: "false",
+      orderByFields: `${F.anio} ASC, ${F.dpto} ASC`,
+      resultOffset: offset, resultRecordCount: batch, f: "json"
+    });
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error.message || 'Error del servicio');
+    const feats = (json.features || []).map(f => f.attributes || {});
+    all = all.concat(feats);
+    if (!json.exceededTransferLimit && feats.length < batch) break;
+    offset += feats.length;
+    if (feats.length === 0) break;
+  }
+  return all;
+}
+
+/* ===================== TRANSFORM ===================== */
+let allRows=[], allRegions=[], selectedRegions=new Set();
+
+function buildRegionIndex(rows){
+  const set=new Set();
+  for(const r of rows){
+    const dptRaw = r[F.dpto];
+    const dptN = norm(dptRaw);
+    if(dptN) set.add(dptN);
+  }
+  allRegions = [...set].sort().map(n=>({
+    norm:n,
+    pretty: toTitleCaseEs(n)
+  }));
+  selectedRegions = new Set(allRegions.map(r=>r.norm));
+  renderRegionDropdown();
+}
+
+function renderRegionDropdown(){
+  const list=document.getElementById('regionList'); if(!list) return;
+  list.innerHTML='';
+  for(const r of allRegions){
+    const id=`chk_${r.norm.replace(/\s+/g,'_')}`;
+    const row=document.createElement('label');
+    row.className='dd-row';
+    row.innerHTML = `
+      <input type="checkbox" id="${id}" ${selectedRegions.has(r.norm)?'checked':''} data-region="${r.norm}">
+      <span>${r.pretty}</span>
+    `;
+    list.appendChild(row);
+  }
+}
+
+/* Agrupar por año y departamento (sumando PIM y Devengado) */
+function buildBy(rows){
+  const byYR=new Map();
+  const yearsSet=new Set();
+
+  for(const r of rows){
+    const dptRaw = r[F.dpto];
+    const dptNorm = norm(dptRaw);
+    if(!dptNorm) continue;
+
+    // Filtrado por dropdown de departamentos
+    if(selectedRegions.size && !selectedRegions.has(dptNorm)) continue;
+
+    const year = Number(r[F.anio]);
+    if(!Number.isFinite(year)) continue;
+
+    const pim = toNum(r[F.montopim]);
+    const dev = toNum(r[F.montodev]);
+    if(!Number.isFinite(pim) || pim <= 0) continue;
+    if(!Number.isFinite(dev) || dev < 0) continue;
+
+    const key = `${year}|${dptNorm}`;
+    if(!byYR.has(key)){
+      byYR.set(key,{
+        anio: year,
+        dptoNorm: dptNorm,
+        dptoPretty: toTitleCaseEs(dptRaw),
+        pim: 0,
+        dev: 0
+      });
+    }
+    const obj = byYR.get(key);
+    obj.pim += pim;
+    obj.dev += dev;
+  }
+
+  const byYear=new Map();
+  for(const v of byYR.values()){
+    const y = v.anio;
+    if(!byYear.has(y)) byYear.set(y,[]);
+    byYear.get(y).push(v);
+    yearsSet.add(y);
+  }
+
+  return { years:[...yearsSet].sort((a,b)=>a-b), byYear };
+}
+
+/* ===================== OPTION ===================== */
+function buildOptionsStruct(byYear){
+  const allX=[],allY=[],allS=[];
+  for(const arr of byYear.values()){
+    for(const p of arr){
+      const pimM = p.pim / 1e6;
+      const devM = p.dev / 1e6;
+      if(Number.isFinite(pimM)) allX.push(pimM);
+      if(Number.isFinite(devM)) allY.push(devM);
+      if(Number.isFinite(p.pim)) allS.push(p.pim); // tamaño según PIM total
+    }
+  }
+  if(!allX.length || !allY.length) throw new Error('Sin datos X/Y.');
+
+  const q = (arr)=>{
+    const s=arr.slice().sort((x,y)=>x-y);
+    const p05 = s[Math.floor((s.length-1)*0.05)] ?? arr[0];
+    const p95 = s[Math.floor((s.length-1)*0.95)] ?? arr.at(-1);
+    const pad = (p95-p05)*0.05;
+    const mn = Math.min(...arr);
+    const mx = Math.max(...arr);
+    const clamp = v => Math.max(0, v);
+    return [
+      clamp(Math.min(p05-pad,mn)),
+      clamp(Math.max(p95+pad,mx))
+    ];
+  };
+
+  const [xMin,xMax]=q(allX);
+  const [yMin,yMax]=q(allY);
+
+  const yearX = xMin + 0.85*(xMax-xMin);
+  const yearY = yMin;
+  const sizeFn = makeSizeFn(allS,18,85);
+
+  const options=[];
+  const years=[...byYear.keys()].sort((a,b)=>a-b);
+  for(const y of years){
+    const pts = (byYear.get(y)||[]).map(p=>{
+      const pimM = p.pim / 1e6;
+      const devM = p.dev / 1e6;
+      if(!Number.isFinite(pimM) || !Number.isFinite(devM)) return null;
+
+      const avancePct = p.pim > 0 ? (p.dev / p.pim) * 100 : NaN;
+
+      return {
+        value:[
+          pimM,                   // 0: PIM en millones
+          devM,                   // 1: Devengado en millones
+          p.pim,                  // 2: métrica para tamaño
+          p.dptoPretty,           // 3: nombre dpto
+          p.anio,                 // 4: año
+          avancePct               // 5: avance %
+        ],
+        itemStyle:{
+          color: colorForAvance(avancePct),
+          opacity: DOT_BORDER.opacity,
+          borderColor: DOT_BORDER.color,
+          borderWidth: DOT_BORDER.width,
+          borderType: DOT_BORDER.type
+        },
+        emphasis:{
+          itemStyle:{
+            borderColor: DOT_BORDER.color,
+            borderWidth: Math.max(DOT_BORDER.width+0.5, DOT_BORDER.width),
+            borderType: DOT_BORDER.type
+          },
+          scale:1.08,
+          focus:'self'
+        }
+      };
+    }).filter(Boolean);
+
+    options.push({
+      series:[
+        {
+          name:String(y),
+          type:'scatter',
+          data:pts,
+          symbolSize:(val)=>sizeFn(val[2]),
+          label:{
+            show:true,
+            formatter:(p)=>p.value[3],
+            position:'right',
+            fontSize:13,
+            color:'#333'
+          }
+        },
+        {
+          name:'yearLabel',
+          type:'scatter',
+          data:[[yearX,yearY]],
+          symbolSize:0,
+          silent:true,
+          tooltip:{show:false},
+          z:0,
+          label:{
+            show:true,
+            formatter:String(y),
+            position:'top',
+            distance:12,
+            color:'#e5e7eb',
+            fontSize:32,
+            fontWeight:700
+          }
+        }
+      ]
+    });
+  }
+
+  const startIdx = years.length ? years.length - 1 : 0; // último año
+
+  return {
+    baseOption:{
+      timeline:{
+        axisType:'category',
+        orient:'vertical',
+        autoPlay:true,
+        inverse:true,
+        playInterval:2000,
+        right:0, top:20, bottom:20,
+        width:55,
+        symbol:'none',
+        checkpointStyle:{ borderWidth:2 },
+        controlStyle:{ showNextBtn:false, showPrevBtn:false },
+        data:years,
+        currentIndex:startIdx
+      },
+
+      grid:{
+        top: 10 + 40 + 16, /* margen topbar aprox */
+        left: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-left-px')) || 40,
+        right: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-right-px')) || 140,
+        bottom: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-bottom-px')) || 64,
+        containLabel:true
+      },
+
+      tooltip:{
+        padding:6, borderWidth:1,
+        formatter:(o)=>{
+          const [pimM, devM, _size, dptoPretty, year, avancePct] = o.value;
+          const fmtMill = (v)=>
+            Number.isFinite(v)
+              ? new Intl.NumberFormat('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v)
+              : '—';
+          const fmtPct = (v)=>
+            Number.isFinite(v)
+              ? new Intl.NumberFormat('es-PE',{maximumFractionDigits:1}).format(v) + '%'
+              : '—';
+          return `<b>${dptoPretty}</b> - ${year}<br>
+                  PIM: <b>S/ ${fmtMill(pimM)} millones</b><br>
+                  Devengado: <b>S/ ${fmtMill(devM)} millones</b><br>
+                  Avance: <b>${fmtPct(avancePct)}</b><br>
+                  <span class="muted">Tamaño de burbuja proporcional al PIM</span>`;
+        }
+      },
+
+      xAxis:{
+        type:'value',
+        name:'Monto PIM (S/ millones)',
+        min:xMin, max:xMax,
+        nameGap:25,
+        nameLocation:'middle',
+        nameTextStyle:{ fontSize:14 },
+        splitLine:{ show:true },
+        scale:true,
+        axisLabel:{
+          formatter:(v)=>`S/ ${new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(v)}`
+        }
+      },
+      yAxis:{
+        type:'value',
+        name:'Monto devengado (S/ millones)',
+        min:yMin, max:yMax,
+        nameTextStyle:{ fontSize:14 },
+        splitLine:{ show:true },
+        scale:true,
+        axisLabel:{
+          formatter:(v)=>`S/ ${new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(v)}`
+        }
+      },
+
+      /* zoom por scroll (sin sliders) */
+      dataZoom:[
+        { type:'inside', xAxisIndex:0, filterMode:'none' },
+        { type:'inside', yAxisIndex:0, filterMode:'none' }
+      ],
+
+      series:[{ type:'scatter', data:[] }],
+      animationDurationUpdate:1000,
+      animationEasingUpdate:'quinticInOut'
+    },
+    options
+  };
+}
+
+/* ===================== RUN ===================== */
+(async function run(){
+  try{
+    chart.showLoading({ text: 'Cargando datos…' });
+    const rows = await fetchAllPaged();
+    allRows = rows;
+    buildRegionIndex(rows);
+
+    async function render(){
+      const { byYear } = buildBy(allRows);
+      const option = buildOptionsStruct(byYear);
+      chart.hideLoading();
+      chart.setOption(option, true);
+    }
+
+    // Dropdown
+    const dd=document.getElementById('regionDD');
+    const trigger=document.getElementById('regionTrigger');
+    const panel=document.getElementById('regionPanel');
+    const listEl=document.getElementById('regionList');
+    const searchEl=document.getElementById('regionSearch');
+    const selAllBtn=document.getElementById('selAll');
+    const selNoneBtn=document.getElementById('selNone');
+
+    if(trigger && dd){
+      const closeOnOutside=(e)=>{ if(!dd.contains(e.target)) dd.classList.remove('open'); };
+      trigger.addEventListener('click', ()=>{
+        dd.classList.toggle('open');
+        if(dd.classList.contains('open'))
+          document.addEventListener('click', closeOnOutside, { once:true });
+      });
+    }
+
+    searchEl?.addEventListener('input', ()=>{
+      const q=searchEl.value.trim().toLowerCase();
+      for(const row of (listEl?.querySelectorAll('.dd-row')||[])){
+        const txt=row.textContent.trim().toLowerCase();
+        row.style.display = txt.includes(q) ? '' : 'none';
+      }
+    });
+
+    selAllBtn?.addEventListener('click', async ()=>{
+      selectedRegions = new Set(allRegions.map(r=>r.norm));
+      renderRegionDropdown();
+      chart.showLoading({ text: 'Actualizando…' });
+      await render();
+    });
+
+    selNoneBtn?.addEventListener('click', async ()=>{
+      selectedRegions = new Set();
+      renderRegionDropdown();
+      chart.showLoading({ text: 'Actualizando…' });
+      await render();
+    });
+
+    listEl?.addEventListener('change', async (e)=>{
+      const t=e.target;
+      if(t && t.matches('input[type="checkbox"][data-region]')){
+        const reg=t.getAttribute('data-region');
+        if(t.checked) selectedRegions.add(reg); else selectedRegions.delete(reg);
+        chart.showLoading({ text: 'Actualizando…' });
+        await render();
+      }
+    });
+
+    await render();
+    window.addEventListener('resize', ()=>{ chart.resize(); });
+
+  }catch(err){
+    console.error(err);
+    chart.hideLoading();
+    chart.setOption({
+      title:{ text:'Error al cargar datos', left:'center' },
+      graphic:{ type:'text', left:'center', top:'middle',
+        style:{ text: (err&&err.message)? err.message : 'Fallo de carga.', fontSize:14 } }
+    });
+  }
+})();
+</script>
+</body>
+</html>
