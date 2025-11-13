@@ -7,43 +7,50 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
   :root{
-    /* Deben coincidir con el grid del chart */
+    /* Deben reflejar el grid del chart; JS los actualiza si es necesario */
     --grid-left-px: 40px;
     --grid-right-px: 140px;
     --grid-bottom-px: 64px;
+
+    /* escala UI para leyenda+controles (0.8–1.2) — la ajusta JS */
+    --ui-scale: 1;
   }
 
   html,body{height:100%;margin:0;background:#fff;font-family:system-ui,Arial}
   #wrap{min-height:100vh;display:flex;flex-direction:column}
 
-  .page-header{padding:12px 10px 6px;text-align:center}
-  .page-header h1{margin:0;font-size:16px;font-weight:700;color:#111827}
+  .page-header{padding:12px 10px 0;text-align:center}
+  .page-header h1{margin:0 0 8px;font-size:16px;font-weight:700;color:#111827}
 
   /* ===== Barra superior alineada al grid ===== */
   .topbar{
     /* ancho exacto del área de ploteo: 100% - (left+right del grid) */
-    margin: 8px var(--grid-right-px) 6px var(--grid-left-px);
+    margin: 4px var(--grid-right-px) 6px var(--grid-left-px);
     display:grid;
-    grid-template-columns: 1fr auto; /* col izquierda (vacía) + col derecha (controles) */
+    grid-template-columns: 1fr auto; /* columna izquierda (vacía) + derecha (controles) */
     align-items:center;
     gap:10px;
-  }
-  .topbar-center{
-    /* truco: centramos la leyenda sobre TODO el ancho del grid,
-       posicionándola absoluta dentro de este contexto con transform */
     position:relative;
-    grid-column: 1 / span 2;  /* ocupa ambas columnas */
-    height:0;                 /* no empuja altura; solo para ubicar elemento centrado */
+    z-index:5; /* por encima del lienzo del chart */
+  }
+
+  /* Leyenda centrada sobre TODO el ancho del grid */
+  .topbar-center{
+    position:relative;
+    grid-column: 1 / span 2; /* ocupa ambas columnas */
+    height:0;               /* no empuja altura, solo sirve de anclaje */
   }
   .legend-box{
     position:absolute; left:50%; transform:translateX(-50%);
     display:inline-flex; align-items:center; gap:8px;
     background:#fff; border:1px solid #e5e7eb; border-radius:14px;
-    padding:6px 10px; box-shadow:0 6px 18px rgba(0,0,0,.08);
-    font-size:12px; font-weight:600; color:#2563eb; user-select:none;
+    padding: calc(6px * var(--ui-scale)) calc(10px * var(--ui-scale));
+    box-shadow:0 6px 18px rgba(0,0,0,.08);
+    font-size: clamp(10px, calc(12px * var(--ui-scale)), 14px);
+    font-weight:600; color:#2563eb; user-select:none; white-space:nowrap;
   }
   .legend-tip{
-    position:absolute; top:34px; left:50%; transform:translateX(-50%);
+    position:absolute; top: calc(34px * var(--ui-scale)); left:50%; transform:translateX(-50%);
     background:#fff; border:1px solid #e5e7eb; border-radius:12px;
     padding:10px 12px; min-width:220px; max-width:260px;
     box-shadow:0 8px 24px rgba(0,0,0,.10); font-size:12px; color:#374151;
@@ -54,16 +61,19 @@
   .lg-chip{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.08)}
   .muted{color:#6b7280}
 
+  /* Controles a la derecha */
   .controls{
     justify-self:end;
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-    max-width:min(92vw, 760px);
+    display:flex; align-items:center; gap:8px; flex-wrap:nowrap;
+    max-width:100%;
   }
   .dd{ position:relative; }
   .dd-trigger, .seg-btn, .pill{
-    font-size:12px;font-weight:600;color:#111827;
+    font-size: clamp(10px, calc(12px * var(--ui-scale)), 14px);
+    font-weight:600;color:#111827;
     background:#fff; border:1px solid #e5e7eb; border-radius:999px;
-    padding:4px 10px; cursor:pointer; user-select:none; white-space:nowrap;
+    padding: calc(4px * var(--ui-scale)) calc(10px * var(--ui-scale));
+    cursor:pointer; user-select:none; white-space:nowrap;
     box-shadow:0 6px 18px rgba(0,0,0,.04);
   }
   .seg-btn.active{ color:#2563eb; border-color:#bfdbfe; }
@@ -79,19 +89,16 @@
   .dd-row{ display:flex; align-items:center; gap:8px; font-size:12px; }
   .dd-actions{ display:flex; justify-content:space-between; gap:8px; margin-bottom:8px; }
 
+  /* Cuando queda MUY angosto forzamos wrap ordenado, pero con tipografía ya escalada suele caber. */
+  @media (max-width:720px){
+    .controls{ flex-wrap:wrap; row-gap:6px; column-gap:6px; }
+  }
+
   /* ===== Chart ===== */
   #chart{
     position:relative;
-    height: calc(100vh - 120px);
+    height: calc(100vh - 130px);
     min-height:520px; width:100%;
-  }
-
-  @media (max-width:900px){
-    :root{ --grid-left-px: 30px; --grid-right-px: 110px; }
-    .dd-trigger, .seg-btn, .pill{ padding:3px 8px; }
-  }
-  @media (max-width:640px){
-    :root{ --grid-left-px: 22px; --grid-right-px: 90px; }
   }
 </style>
 </head>
@@ -273,7 +280,7 @@ function buildOptionsStruct(byYear){
                  checkpointStyle:{ borderWidth:2 }, controlStyle:{ showNextBtn:false, showPrevBtn:false }, data:years, currentIndex:startIdx },
 
       grid:{
-        top: 10 + 40 + 16, /* margen topbar aprox: (leyenda) + separación */
+        top: 90, /* se recalcula abajo con la altura real de la barra */
         left: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-left-px')) || 40,
         right: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-right-px')) || 140,
         bottom: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-bottom-px')) || 64,
@@ -315,6 +322,35 @@ function buildOptionsStruct(byYear){
   };
 }
 
+/* === Ajuste UI responsive: escala de botones y separación con el chart === */
+function updateUiScaleAndGridTop(){
+  const rootStyle = document.documentElement.style;
+  const gridLeft  = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-left-px')) || 40;
+  const gridRight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-right-px')) || 140;
+
+  // ancho útil del área de ploteo (grid) -> chartWidth - (left+right)
+  const plotWidth = chart.getWidth() - gridLeft - gridRight;
+
+  // Escala 0.8–1.2 según ancho (<=520px: 0.85; 520–900: ~0.9-1.0; >=1200: 1.1-1.2)
+  let scale = 1.0;
+  if (plotWidth < 520) scale = 0.85;
+  else if (plotWidth < 700) scale = 0.92;
+  else if (plotWidth < 900) scale = 0.98;
+  else if (plotWidth > 1400) scale = 1.1;
+  scale = Math.max(0.8, Math.min(1.2, scale));
+  rootStyle.setProperty('--ui-scale', String(scale));
+
+  // Altura real de la barra (leyenda + controles) para despegar el grid
+  const topbar = document.getElementById('topbar');
+  const h = (topbar?.getBoundingClientRect().height || 0) + 10; // margen extra
+
+  const opt = chart.getOption();
+  if(opt && opt.grid && opt.grid.length){
+    opt.grid[0].top = Math.max(70, Math.round(h));
+    chart.setOption(opt);
+  }
+}
+
 /* ===================== RUN ===================== */
 (async function run(){
   try{
@@ -327,6 +363,8 @@ function buildOptionsStruct(byYear){
       const option = buildOptionsStruct(byYear);
       chart.hideLoading();
       chart.setOption(option, true);
+      // Recalcular separación y escala luego de pintar
+      requestAnimationFrame(()=>{ updateUiScaleAndGridTop(); });
     }
 
     // Segmentación
@@ -385,8 +423,13 @@ function buildOptionsStruct(byYear){
       }
     });
 
+    // Primer render
     await render();
-    window.addEventListener('resize', ()=>{ chart.resize(); });
+
+    // Resize responsive (incluye StoryMap)
+    const ro = new ResizeObserver(()=>{ chart.resize(); updateUiScaleAndGridTop(); });
+    ro.observe(document.getElementById('chart'));
+    window.addEventListener('orientationchange', ()=>{ chart.resize(); updateUiScaleAndGridTop(); });
 
   }catch(err){
     console.error(err);
