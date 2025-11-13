@@ -96,7 +96,7 @@
 <body>
 <div id="wrap">
   <div class="page-header">
-    <h1>Evolución de Principales Indicadores de Saneamiento</h1>
+    <h1>PIM vs Devengado según departamento ejecutora - Saneamiento</h1>
   </div>
 
   <!-- Barra alineada al ancho del grid -->
@@ -144,12 +144,22 @@ const F = {
   montopim: "monto_pim",
   montodev: "monto_devengado",
   dpto : "departamento_ejecutora_nombre",
-  prov : "provincia_ejecutora_nombre",
-  dist : "distrito_ejecutora_nombre",
   funcion: "funcion_nombre"
 };
 
 const chart = echarts.init(document.getElementById('chart'));
+
+/* ====== Formatters reutilizables (mejor performance) ====== */
+const fmtMill = new Intl.NumberFormat('es-PE', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+const fmtPct = new Intl.NumberFormat('es-PE', {
+  maximumFractionDigits: 1
+});
+const fmtAxis = new Intl.NumberFormat('es-PE', {
+  maximumFractionDigits: 1
+});
 
 const norm = s => String(s ?? '').normalize('NFD')
   .replace(/[\u0300-\u036f]/g,'')
@@ -187,7 +197,9 @@ function colorForAvance(p){
   return '#1dfc12';               // verde
 }
 
-function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+function qs(url, params){
+  return url + "?" + new URLSearchParams(params).toString();
+}
 
 function extent(a){
   let m=+Infinity,M=-Infinity;
@@ -196,12 +208,7 @@ function extent(a){
   if(m===M)return[0,M||1];
   return[m,M];
 }
-function quantile(a,q){
-  const s=a.slice().sort((x,y)=>x-y);
-  if(!s.length)return NaN;
-  const p=(s.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);
-  return lo===hi?s[lo]:s[hi]+(s[hi]-s[lo])*(p-lo);
-}
+
 function makeSizeFn(values, minPx=18, maxPx=85){
   const [mn,mx]=extent(values);
   return x=>{
@@ -213,24 +220,37 @@ function makeSizeFn(values, minPx=18, maxPx=85){
 }
 
 /* ===================== DATA ===================== */
-async function fetchAllPaged(){
-  // Solo función "SANEAMIENTO" y registros con PIM/Dev no nulos
+/* Nuevo: pedimos datos YA agregados por año + departamento */
+async function fetchAllAggregated(){
   const where = `${F.funcion} = 'SANEAMIENTO' AND ${F.montopim} IS NOT NULL AND ${F.montodev} IS NOT NULL`;
+
+  const outStats = JSON.stringify([
+    { statisticType:'sum', onStatisticField:F.montopim,  outStatisticFieldName:'pim_sum' },
+    { statisticType:'sum', onStatisticField:F.montodev,  outStatisticFieldName:'dev_sum' }
+  ]);
+
   let offset = 0, batch = 2000, all = [];
   while(true){
     const url = qs(`${tableUrl}/query`, {
       where,
-      outFields: [F.anio,F.montopim,F.montodev,F.dpto,F.funcion].join(','),
+      outFields: [F.anio, F.dpto].join(','),
+      groupByFieldsForStatistics: [F.anio, F.dpto].join(','),
+      outStatistics: outStats,
       returnGeometry: "false",
       orderByFields: `${F.anio} ASC, ${F.dpto} ASC`,
-      resultOffset: offset, resultRecordCount: batch, f: "json"
+      resultOffset: offset,
+      resultRecordCount: batch,
+      f: "json"
     });
-    const res = await fetch(url, {cache:'no-store'});
+
+    const res = await fetch(url);  // dejamos cache por defecto (más rápido en recargas)
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if(json.error) throw new Error(json.error.message || 'Error del servicio');
+
     const feats = (json.features || []).map(f => f.attributes || {});
     all = all.concat(feats);
+
     if (!json.exceededTransferLimit && feats.length < batch) break;
     offset += feats.length;
     if (feats.length === 0) break;
@@ -271,9 +291,9 @@ function renderRegionDropdown(){
   }
 }
 
-/* Agrupar por año y departamento (sumando PIM y Devengado) */
+/* Agrupar por año usando los datos YA SUMADOS */
 function buildBy(rows){
-  const byYR=new Map();
+  const byYear=new Map();
   const yearsSet=new Set();
 
   for(const r of rows){
@@ -281,38 +301,27 @@ function buildBy(rows){
     const dptNorm = norm(dptRaw);
     if(!dptNorm) continue;
 
-    // Filtrado por dropdown de departamentos
     if(selectedRegions.size && !selectedRegions.has(dptNorm)) continue;
 
     const year = Number(r[F.anio]);
     if(!Number.isFinite(year)) continue;
 
-    const pim = toNum(r[F.montopim]);
-    const dev = toNum(r[F.montodev]);
+    const pim = toNum(r.pim_sum);
+    const dev = toNum(r.dev_sum);
     if(!Number.isFinite(pim) || pim <= 0) continue;
     if(!Number.isFinite(dev) || dev < 0) continue;
 
-    const key = `${year}|${dptNorm}`;
-    if(!byYR.has(key)){
-      byYR.set(key,{
-        anio: year,
-        dptoNorm: dptNorm,
-        dptoPretty: toTitleCaseEs(dptRaw),
-        pim: 0,
-        dev: 0
-      });
-    }
-    const obj = byYR.get(key);
-    obj.pim += pim;
-    obj.dev += dev;
-  }
+    const obj = {
+      anio: year,
+      dptoNorm: dptNorm,
+      dptoPretty: toTitleCaseEs(dptRaw),
+      pim,
+      dev
+    };
 
-  const byYear=new Map();
-  for(const v of byYR.values()){
-    const y = v.anio;
-    if(!byYear.has(y)) byYear.set(y,[]);
-    byYear.get(y).push(v);
-    yearsSet.add(y);
+    if(!byYear.has(year)) byYear.set(year,[]);
+    byYear.get(year).push(obj);
+    yearsSet.add(year);
   }
 
   return { years:[...yearsSet].sort((a,b)=>a-b), byYear };
@@ -428,6 +437,11 @@ function buildOptionsStruct(byYear){
     });
   }
 
+  const rootStyles = getComputedStyle(document.documentElement);
+  const gridLeft  = parseInt(rootStyles.getPropertyValue('--grid-left-px'))  || 40;
+  const gridRight = parseInt(rootStyles.getPropertyValue('--grid-right-px')) || 140;
+  const gridBottom= parseInt(rootStyles.getPropertyValue('--grid-bottom-px'))|| 64;
+
   const startIdx = years.length ? years.length - 1 : 0; // último año
 
   return {
@@ -448,10 +462,10 @@ function buildOptionsStruct(byYear){
       },
 
       grid:{
-        top: 10 + 40 + 16, /* margen topbar aprox */
-        left: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-left-px')) || 40,
-        right: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-right-px')) || 140,
-        bottom: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--grid-bottom-px')) || 64,
+        top: 10 + 40 + 16,
+        left: gridLeft,
+        right: gridRight,
+        bottom: gridBottom,
         containLabel:true
       },
 
@@ -459,25 +473,19 @@ function buildOptionsStruct(byYear){
         padding:6, borderWidth:1,
         formatter:(o)=>{
           const [pimM, devM, _size, dptoPretty, year, avancePct] = o.value;
-          const fmtMill = (v)=>
-            Number.isFinite(v)
-              ? new Intl.NumberFormat('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v)
-              : '—';
-          const fmtPct = (v)=>
-            Number.isFinite(v)
-              ? new Intl.NumberFormat('es-PE',{maximumFractionDigits:1}).format(v) + '%'
-              : '—';
+          const mill = v => Number.isFinite(v) ? fmtMill.format(v) : '—';
+          const pct  = v => Number.isFinite(v) ? fmtPct.format(v) + '%' : '—';
           return `<b>${dptoPretty}</b> - ${year}<br>
-                  PIM: <b>S/ ${fmtMill(pimM)} millones</b><br>
-                  Devengado: <b>S/ ${fmtMill(devM)} millones</b><br>
-                  Avance: <b>${fmtPct(avancePct)}</b><br>
+                  PIM: <b>S/ ${mill(pimM)} millones</b><br>
+                  Devengado: <b>S/ ${mill(devM)} millones</b><br>
+                  Avance: <b>${pct(avancePct)}</b><br>
                   <span class="muted">Tamaño de burbuja proporcional al PIM</span>`;
         }
       },
 
       xAxis:{
         type:'value',
-        name:'Monto PIM (S/ millones)',
+        name:'PIM (S/ millones)',
         min:xMin, max:xMax,
         nameGap:25,
         nameLocation:'middle',
@@ -485,22 +493,21 @@ function buildOptionsStruct(byYear){
         splitLine:{ show:true },
         scale:true,
         axisLabel:{
-          formatter:(v)=>`S/ ${new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(v)}`
+          formatter:(v)=>`S/ ${fmtAxis.format(v)}`
         }
       },
       yAxis:{
         type:'value',
-        name:'Monto devengado (S/ millones)',
+        name:'Devengado (S/ millones)',
         min:yMin, max:yMax,
         nameTextStyle:{ fontSize:14 },
         splitLine:{ show:true },
         scale:true,
         axisLabel:{
-          formatter:(v)=>`S/ ${new Intl.NumberFormat('es-PE',{ maximumFractionDigits:1 }).format(v)}`
+          formatter:(v)=>`S/ ${fmtAxis.format(v)}`
         }
       },
 
-      /* zoom por scroll (sin sliders) */
       dataZoom:[
         { type:'inside', xAxisIndex:0, filterMode:'none' },
         { type:'inside', yAxisIndex:0, filterMode:'none' }
@@ -518,7 +525,7 @@ function buildOptionsStruct(byYear){
 (async function run(){
   try{
     chart.showLoading({ text: 'Cargando datos…' });
-    const rows = await fetchAllPaged();
+    const rows = await fetchAllAggregated();
     allRows = rows;
     buildRegionIndex(rows);
 
