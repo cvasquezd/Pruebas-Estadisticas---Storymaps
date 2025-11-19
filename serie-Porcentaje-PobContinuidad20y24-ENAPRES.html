@@ -26,9 +26,10 @@
 
 <script>
 (function(){
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
-  const TARGET_TABLE_NAME = "bd_geovivienda.ogei.tb_indicadores_serie";
-  const INDICADOR_OBJ = "Pob_Conti_20_24";   // ← NUEVO id_indicador
+  // === SERVICIO ACTUALIZADO ===
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/PNC/Mapa_Indicadores_san_ejec_story/MapServer";
+  const TARGET_TABLE_NAME = "tb_indicadores_serie";
+  const INDICADOR_OBJ = "Pob_Conti_20_24";   // id_indicador
   const REGION_TOTAL = "NACIONAL";
 
   // Formateador 1 decimal con símbolo %
@@ -149,7 +150,7 @@
     fields = {
       anio  : resolveFieldName(info.data, ["anio"]),
       ambito: resolveFieldName(info.data, ["ambito"]),
-      pct   : resolveFieldName(info.data, ["valor_porcentaje","porcentaje","valor_pct","valor_porcentual"]), // ← NUEVO: eje Y
+      pct   : resolveFieldName(info.data, ["valor_porcentaje","porcentaje","valor_pct","valor_porcentual"]),
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"])
     };
@@ -311,10 +312,11 @@
 
     // Mapeo: NACIONAL → TOTAL para consulta por regiones
     const ambForRegions = (amb === 'NACIONAL') ? 'TOTAL' : amb;
+    const yearStr = String(year);              // ← anio es TEXTO en el servicio
 
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND ` +
-      `${anio}=${Number(year)} AND ` +
+      `${anio}='${yearStr}' AND ` +             // ← filtro de año como texto
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
 
@@ -416,3 +418,4 @@
 </script>
 </body>
 </html>
+
