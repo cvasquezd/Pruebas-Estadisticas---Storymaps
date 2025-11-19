@@ -26,7 +26,8 @@
 
 <script>
 (function(){
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
+  /* 🔁 Nuevo servicio PNC */
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/PNC/Mapa_Indicadores_san_ejec_story/MapServer";
   const TARGET_TABLE_NAME = "bd_geovivienda.ogei.tb_indicadores_serie";
   const INDICADOR_OBJ = "Quien_recoge";   // ajústalo si corresponde
   const REGION_TOTAL = "NACIONAL";
@@ -198,7 +199,11 @@
     const desiredOrder = ["Mujer adulta","Hombre adulto","Menores de 15 años","Otros"];
 
     // Paleta
-    const tones = (n)=>{ const minL=Math.max(22, baseHSL.l-12), maxL=Math.min(82, baseHSL.l+22); const arr=[]; for(let i=0;i<n;i++){ const t=n===1?0.5:i/(n-1); arr.push(hsl(baseHSL.h, baseHSL.s, Math.round(minL+(maxL-minL)*t))); } return arr; };
+    const tones = (n)=>{
+      const minL=Math.max(22, baseHSL.l-12), maxL=Math.min(82, baseHSL.l+22);
+      const arr=[]; for(let i=0;i<n;i++){ const t=n===1?0.5:i/(n-1); arr.push(hsl(baseHSL.h, baseHSL.s, Math.round(minL+(maxL-minL)*t))); }
+      return arr;
+    };
     const cats = Object.keys(byCat);
     const orderedCats = [...desiredOrder.filter(c=>cats.includes(c)), ...cats.filter(c=>!desiredOrder.includes(c)).sort()];
     const palette = tones(orderedCats.length);
@@ -275,35 +280,45 @@
     $err.textContent = '';
   }
 
-  // ========= BARRAS: X=region (!=NACIONAL), Y=valor_recuento (%), + texto superior tipo “Porcentaje — cat — año”
+  // ========= BARRAS: X=region (!=NACIONAL), Y=valor_recuento (%), cabecera arriba =========
   async function loadBars({year, categoria, color}){
     const {anio, dval, valor, region, ind} = fields;
 
+    // 🔁 Ya no filtramos por anio en el servidor: traemos todo y filtramos en cliente
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND ` +
-      `${anio}=${Number(year)} AND ` +
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `${dval}='${categoria.replace(/'/g,"''")}'`;
 
     const res = await jsonp(tableUrl + "/query", {
       where,
-      outFields: [region,valor].join(","),
+      outFields: [anio,region,valor].join(","),   // incluimos anio para filtrar en cliente
       orderByFields: `${region} ASC`,
       returnGeometry: "false",
       f: "json"
     }, 20000);
 
     const features = (res.data && res.data.features) || [];
-    if(!features.length) throw new Error(`Sin datos para ${categoria} en ${year}.`);
+    if(!features.length) throw new Error(`Sin datos para ${categoria} (consulta base).`);
 
+    // Normalizamos y filtramos por año del lado del cliente
     const rows0 = features
       .map(f=>f.attributes)
-      .filter(r => r && r[region] && r[valor]!=null)
-      .map(r => ({ region: normalize(r[region]), valor : Number(r[valor]) }));
+      .filter(r => r && r[region] && r[valor]!=null && r[anio]!=null)
+      .map(r => ({
+        anio  : Number(r[anio]),
+        region: normalize(r[region]),
+        valor : Number(r[valor])
+      }));
+
+    const yearNum = Number(year);
+    const rowsYear = rows0.filter(r => r.anio === yearNum);
+
+    if(!rowsYear.length) throw new Error(`Sin datos para ${categoria} en ${year}.`);
 
     // Agregar por región (promedio si hay múltiples)
     const agg = new Map();
-    for (const r of rows0){
+    for (const r of rowsYear){
       const key = up(r.region);
       const cur = agg.get(key) || { name: r.region, sum: 0, count: 0 };
       cur.sum += r.valor;
@@ -402,3 +417,4 @@
 </script>
 </body>
 </html>
+
