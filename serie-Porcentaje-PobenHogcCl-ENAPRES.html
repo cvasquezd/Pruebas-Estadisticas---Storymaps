@@ -27,15 +27,15 @@
 <script>
 (function(){
   // ======= Config =======
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
-  const TARGET_TABLE_NAME = "bd_geovivienda.ogei.tb_indicadores_serie";
-  const INDICADOR_OBJ = "Ind_12_pob";   // ← id_indicador solicitado
+  // Servicio nuevo PNC
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/PNC/Mapa_Indicadores_san_ejec_story/MapServer";
+  const TARGET_TABLE_NAME = "tb_indicadores_serie";
+  const INDICADOR_OBJ = "Ind_12_pob";   // id_indicador solicitado
   const D_VALORES = "CON ACCESO";
   const REGION_TOTAL = "NACIONAL";
 
   // ======= Helpers =======
   const nf1 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const nf0 = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 0 });
   const norm = (s)=> String(s||'').replace(/\s+/g,' ').trim();
   const up   = (s)=> norm(s).toUpperCase();
   const cleanFlag = (v)=> {
@@ -44,7 +44,6 @@
   };
 
   // Formateo de valor_recuento (LOS VALORES ESTÁN EN MILES).
-  // Mostrar SIEMPRE 1 decimal + sufijo "mil" o "millones" según corresponda.
   function formatRecuento(vThousands){
     if(vThousands == null || isNaN(vThousands)) return '';
     const n = Number(vThousands);
@@ -129,7 +128,6 @@
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
-      // Tooltip con porcentaje + recuento formateado + flag (si aplica)
       formatter: (params)=>{
         const opt = chart.getOption();
         const year = params?.[0]?.axisValue ?? '';
@@ -139,9 +137,7 @@
           const recMap  = serOpt._recByYear  || {};
           const flagMap = serOpt._flagByYear || {};
           const flagSuf = flagMap[String(year)] ? String(flagMap[String(year)]) : '';
-          // % + flag
           const vTxt = (p.value==null||isNaN(p.value)) ? '—' : `${nf1.format(+p.value)}%${flagSuf}`;
-          // recuento + flag
           const rec = recMap[String(year)];
           const recTxt = (rec==null || isNaN(rec)) ? '' : ` - ${formatRecuento(rec)}${flagSuf}`;
           lines.push(`${p.marker} ${p.seriesName}: <b>${vTxt}</b>${recTxt}`);
@@ -180,7 +176,7 @@
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
       dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
       rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
-      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← campo para tooltip
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"])
     };
     if(Object.values(fields).some(v=>!v)) throw new Error("Campos requeridos no hallados.");
   }
@@ -220,7 +216,7 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación (ambito, anio): promedio de %; suma de recuento; consolidación de flags
+    // agregación (ambito, anio)
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
@@ -235,7 +231,6 @@
       return { ambito: amb, anio: Number(an), valor: o.sum / o.count, recuento: o.rec, flag: Array.from(o.flags).join('') };
     });
 
-    // Mostrar TOTAL, URBANO, RURAL
     const VALID = new Set(['TOTAL','URBANO','RURAL']);
     const filtered = rows.filter(r => VALID.has(r.ambito));
 
@@ -256,7 +251,6 @@
       seriesPrep.push({ name: ambito, data, mean, recByYear, flagByYear });
     });
 
-    // Orden de botones: TOTAL → URBANO → RURAL
     const prefer = ["TOTAL","URBANO","RURAL"];
     seriesPrep.sort((a,b)=>{
       const ai = prefer.indexOf(a.name), bi = prefer.indexOf(b.name);
@@ -268,7 +262,6 @@
       return (b.mean||0)-(a.mean||0);
     });
 
-    // Colores/estilos + etiquetas
     const n = Math.max(1, seriesPrep.length);
     const minL = Math.max(18, baseHSL.l - 12);
     const maxL = Math.min(85, baseHSL.l + 26);
@@ -277,7 +270,9 @@
     const series = seriesPrep.map((s,i)=>{
       const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
       const name = s.name;
-      const lineType = name==="TOTAL" ? 'solid' : (name==="URBANO" ? 'dashed' : (name==="RURAL" ? 'dotted' : 'solid'));
+      const lineType = name==="TOTAL" ? 'solid'
+                        : name==="URBANO" ? 'dashed'
+                        : name==="RURAL"  ? 'dotted' : 'solid';
       return {
         name,
         type: 'line',
@@ -291,21 +286,20 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear,   // ← para tooltip
-        _flagByYear: s.flagByYear, // ← para tooltip
+        _recByYear: s.recByYear,
+        _flagByYear: s.flagByYear,
         label: {
           show: true,
           position: 'top',
           distance: 8,
           fontSize: 12,
           color: '#111827',
-          formatter: (p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)}%` // ← sin flag en etiqueta
+          formatter: (p)=> (p.value==null||isNaN(p.value)) ? '' : `${nf1.format(+p.value)}%`
         },
         labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' }
       };
     });
 
-    // Eje Y con colchón
     const vals = seriesPrep.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
     const vmin = Math.min(...vals), vmax = Math.max(...vals);
     const pad = Math.max((vmax - vmin) * 0.18, 1.2);
@@ -344,11 +338,15 @@
   async function loadBars({year, amb, color}){
     const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
-    const ambForRegions = amb; // TOTAL/URBANO/RURAL ya está listo
+    const ambForRegions = amb; // TOTAL / URBANO / RURAL
+    const yearStr = String(year); // anio es TEXT en el servicio
 
     const where =
-      `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND UPPER(${dvals})=UPPER('${D_VALORES}') AND ${anio}=${Number(year)} AND ` +
-      `UPPER(${region})<>'${REGION_TOTAL}' AND UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
+      `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND ` +
+      `UPPER(${dvals})=UPPER('${D_VALORES}') AND ` +
+      `${anio}='${yearStr}' AND ` +                     // año como texto
+      `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
+      `UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
 
     const outFields = [region, valor, rec].concat(flag?[flag]:[]).join(",");
 
@@ -372,11 +370,9 @@
         flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // 0..1 -> % si aplica
     const maxRaw = Math.max(...raw.map(r=>r.valor));
     const scale = (maxRaw <= 1.5) ? 100 : 1;
 
-    // Agregar por región (promedio %; suma recuento; consolidación de flags)
     const agg = new Map();
     raw.forEach(r=>{
       const key = up(r.region);
@@ -415,8 +411,8 @@
           const idx = p.dataIndex;
           const flagSuf = flags[idx] ? String(flags[idx]) : '';
           const recHere = recs[idx];
-          const pctTxt = `${nf1.format(+p.value)}%${flagSuf}`;                 // % + flag
-          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}${flagSuf}`; // recuento + flag
+          const pctTxt = `${nf1.format(+p.value)}%${flagSuf}`;
+          const recTxt = (recHere==null || isNaN(recHere)) ? '' : ` - ${formatRecuento(recHere)}${flagSuf}`;
           return `${p.axisValueLabel}<br><b>${pctTxt}</b>${recTxt}`;
         }
       },
@@ -428,7 +424,7 @@
         type: 'bar',
         data: y,
         itemStyle: { color: color },
-        label: { show:true, position:'top', formatter:(p)=>`${nf1.format(+p.value)}%` } // ← sin flag en etiqueta
+        label: { show:true, position:'top', formatter:(p)=>`${nf1.format(+p.value)}%` }
       }],
       animation: true,
       animationDuration: 900,
@@ -473,5 +469,6 @@
 </script>
 </body>
 </html>
+
 
 
