@@ -26,7 +26,8 @@
 
 <script>
 (function(){
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
+  // === OJO: nuevo servicio ===
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/PNC/Mapa_Indicadores_san_ejec_story/MapServer";
   const TARGET_TABLE_NAME = "tb_indicadores_serie";
   const INDICADOR_ID = "Ind_18";
   const D_VALORES = "CON ACCESO";
@@ -174,7 +175,7 @@
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
       dvals : resolveFieldName(info.data, ["d_valores","d valores","descripcion_valor"]),
       rec   : resolveFieldName(info.data, ["valor_recuento","valor recuento","recuento","conteo"]),
-      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← NUEVO
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"])
     };
     if(!fields.anio || !fields.ambito || !fields.valor || !fields.region || !fields.ind || !fields.dvals){
       throw new Error("Campos requeridos no hallados.");
@@ -233,7 +234,7 @@
     const scale = (maxRaw <= 1.5) ? 100 : 1;
     raw.forEach(r => r.valor = r.valor * scale);
 
-    // agregación por (ambito, anio): promedio de %, suma de recuento (miles) y consolidación de flags
+    // agregación por (ambito, anio)
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
@@ -302,8 +303,8 @@
         clip: true,
         data: s.data,
         _color: col,
-        _recByYear: s.recByYear,    // mapa año -> recuento (miles)
-        _flagByYear: s.flagByYear   // mapa año -> string de flag (p.ej. "*")
+        _recByYear: s.recByYear,
+        _flagByYear: s.flagByYear
       };
     });
 
@@ -333,7 +334,7 @@
       graphic: []
     });
 
-    // etiquetas tras animación (sin flag, solo tooltip)
+    // etiquetas tras animación
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -365,10 +366,13 @@
   async function loadBars({year, amb, color}){
     const {anio, ambito, valor, region, ind, dvals, rec, flag} = fields;
 
+    // IMPORTANTE: anio es string => comillas
+    const yearStr = String(year);
+
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_ID}') AND ` +
       `UPPER(${dvals})=UPPER('${D_VALORES}') AND ` +
-      `${anio}=${Number(year)} AND ` +
+      `${anio}='${yearStr}' AND ` +             // <-- aquí el cambio clave
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `UPPER(${ambito}) LIKE '%${amb}%'`;
 
