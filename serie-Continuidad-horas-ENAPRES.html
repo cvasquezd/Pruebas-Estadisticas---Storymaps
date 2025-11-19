@@ -26,8 +26,9 @@
 
 <script>
 (function(){
-  const SERVICE = "https://pportalgis.vivienda.gob.pe/phtserver/rest/services/indicadores_saneamiento_ejec_storymap/MapServer";
-  const TARGET_TABLE_NAME = "bd_geovivienda.ogei.tb_indicadores_serie";
+  // === SERVICIO ACTUALIZADO ===
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/PNC/Mapa_Indicadores_san_ejec_story/MapServer";
+  const TARGET_TABLE_NAME = "tb_indicadores_serie";
   const INDICADOR_OBJ = "Ind_13";           // id_indicador solicitado
   const REGION_TOTAL = "NACIONAL";
 
@@ -155,10 +156,10 @@
     fields = {
       anio  : resolveFieldName(info.data, ["anio"]),
       ambito: resolveFieldName(info.data, ["ambito"]),
-      rec   : resolveFieldName(info.data, ["valor_recuento","recuento","conteo"]), // ← eje Y (horas)
+      rec   : resolveFieldName(info.data, ["valor_recuento","recuento","conteo"]), // eje Y (horas)
       region: resolveFieldName(info.data, ["region"]),
       ind   : resolveFieldName(info.data, ["id_indicador","indicador_id"]),
-      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"]) // ← NUEVO (para tooltip)
+      flag  : resolveFieldName(info.data, ["flag_coef_var","flag","coef_var_flag"])
     };
     if(!fields.anio || !fields.ambito || !fields.rec || !fields.region || !fields.ind){
       throw new Error("Campos requeridos no hallados (revise 'valor_recuento').");
@@ -195,7 +196,6 @@
         flag: flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // agregación (ambito, anio) — promedio y consolidación de flags
     const agg = new Map();
     raw.forEach(r=>{
       const key = r.ambito + "|" + r.anio;
@@ -209,7 +209,6 @@
       return { ambito: amb, anio: Number(an), valor: o.sum / o.count, flag: Array.from(o.flags).join('') };
     });
 
-    // Incluir TOTAL también
     const VALID = new Set(['TOTAL','URBANO','RURAL','NACIONAL']);
     const filtered = rows.filter(r => VALID.has(r.ambito));
 
@@ -228,7 +227,6 @@
       seriesPrep.push({ name: ambito, data, mean, flagByYear });
     });
 
-    // Orden: TOTAL → URBANO → RURAL → NACIONAL
     const prefer = ["TOTAL","URBANO","RURAL","NACIONAL"];
     seriesPrep.sort((a,b)=>{
       const ai = prefer.indexOf(a.name), bi = prefer.indexOf(b.name);
@@ -240,7 +238,6 @@
       return (b.mean||0)-(a.mean||0);
     });
 
-    // colores/estilos
     const n = Math.max(1, seriesPrep.length);
     const minL = Math.max(18, baseHSL.l - 12);
     const maxL = Math.min(85, baseHSL.l + 26);
@@ -250,10 +247,10 @@
       const col = hsl(baseHSL.h, baseHSL.s, stepL(i));
       const name = s.name;
       const lineType =
-        name==="TOTAL"   ? 'solid'  :
-        name==="URBANO"  ? 'dashed' :
-        name==="RURAL"   ? 'dotted' :
-        name==="NACIONAL" ? 'solid'  : 'solid';   // ← COMILLA CORREGIDA AQUÍ
+        name==="TOTAL"    ? 'solid'  :
+        name==="URBANO"   ? 'dashed' :
+        name==="RURAL"    ? 'dotted' :
+        name==="NACIONAL" ? 'solid'  : 'solid';
       return {
         name,
         type: 'line',
@@ -267,11 +264,10 @@
         clip: true,
         data: s.data,
         _color: col,
-        _flagByYear: s.flagByYear   // ← para tooltip
+        _flagByYear: s.flagByYear
       };
     });
 
-    // Leyenda
     const names = series.map(s=>s.name);
     const legendData = [];
     prefer.forEach(nm => { if (names.includes(nm)) legendData.push(nm); });
@@ -294,7 +290,6 @@
       graphic: []
     });
 
-    // etiquetas (sin flag; solo tooltip lo lleva)
     let labelsShown = false;
     chart.off('finished');
     chart.on('finished', ()=>{
@@ -310,7 +305,6 @@
       });
     });
 
-    // click -> drilldown
     chart.off('click');
     chart.on('click', (ev)=>{
       if(ev.componentType==='series' && ev.seriesType==='line'){
@@ -327,16 +321,16 @@
     $err.textContent = '';
   }
 
-  // ========= BARRAS (drilldown por región; usa valor_recuento en Y) =========
+  // ========= BARRAS (drilldown por región) =========
   async function loadBars({year, amb, color}){
     const {anio, ambito, rec, region, ind, flag} = fields;
 
-    // Mapeo: NACIONAL → TOTAL para consulta por regiones
     const ambForRegions = (amb === 'NACIONAL') ? 'TOTAL' : amb;
+    const yearStr = String(year); // anio es string en el servicio
 
     const where =
       `UPPER(${ind})=UPPER('${INDICADOR_OBJ}') AND ` +
-      `${anio}=${Number(year)} AND ` +
+      `${anio}='${yearStr}' AND ` +                   // <--- cambio clave
       `UPPER(${region})<>'${REGION_TOTAL}' AND ` +
       `UPPER(${ambito}) LIKE '%${ambForRegions}%'`;
 
@@ -362,7 +356,6 @@
         flag  : flag ? cleanFlag(r[flag]) : ''
       }));
 
-    // agregar por región (promedio) + consolidación de flags
     const agg = new Map();
     for (const r of rows0){
       const key = up(r.region);
@@ -417,7 +410,6 @@
       })
     });
 
-    // ESC para volver
     document.onkeydown = async (e)=>{
       if(e.key === 'Escape'){
         document.onkeydown = null;
@@ -453,3 +445,4 @@
 </script>
 </body>
 </html>
+
