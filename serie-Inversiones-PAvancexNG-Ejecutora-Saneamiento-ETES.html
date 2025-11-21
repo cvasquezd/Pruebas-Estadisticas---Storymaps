@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>% Avance por nivel de gobierno</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --fg:#111827;
+      --muted:#6b7280;
+      --card:#fafafa;
+      --shadow:0 6px 28px rgba(0,0,0,.08);
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      background:var(--bg);
+      color:var(--fg);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+    #wrap{
+      max-width:1100px;
+      margin:18px auto;
+      padding:0 14px;
+    }
+    h1{
+      font-weight:700;
+      font-size:20px;
+      margin:0 0 6px;
+      text-align:center;
+    }
+    .sub{
+      color:var(--muted);
+      font-size:12px;
+      margin:0 0 14px;
+      text-align:center;
+    }
+    #chart{
+      height:70vh;
+      min-height:460px;
+      background:var(--card);
+      border-radius:16px;
+      box-shadow:var(--shadow);
+      position:relative;
+    }
+    #loading{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:13px;
+      color:#6b7280;
+    }
+    #err{
+      margin-top:10px;
+      color:#b91c1c;
+      font-size:12px;
+      white-space:pre-wrap;
+      display:none;
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1 id="topTitle">% Avance por nivel de gobierno</h1>
+  <p class="sub">Fuente: MEF- Consulta amigable</p>
+  <div id="chart"><div id="loading">Cargando datos…</div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  // ========= Servicio / tabla =========
+  const SERVICE = "https://portalgis.vivienda.gob.pe/servergis/rest/services/OGEI/Mapa_Inversiones_MEF/FeatureServer";
+  const TABLE_ID = 4; // <--- CAMBIADO A 4
+  const tableUrl = SERVICE + "/" + TABLE_ID;
+
+  // ========= Campos =========
+  const F = {
+    anio : "ano_eje",
+    nivel: "nivel_gobierno_nombre",
+    monto: "monto_devengado",   // numerador
+    pim  : "monto_pim",         // denominador
+    dpto : "departamento_ejecutora_nombre",
+    prov : "provincia_ejecutora_nombre",
+    dist : "distrito_ejecutora_nombre",
+    funcion: "funcion_nombre"
+  };
+
+  // ========= Formatos =========
+  function formatPercent(v){
+    if(v == null || isNaN(v)) return "";
+    return Math.round(v) + "%";
+  }
+
+  // Reemplazo de nombre para visualización
+  function formatLocationName(v){
+    const raw = String(v || "");
+    const s = raw.toUpperCase().trim();
+    if(s === "PROVINCIA CONSTITUCIONAL DEL CALLAO") return "CALLAO";
+    return raw;
+  }
+
+  // ========= Paleta =========
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){
+    const m=hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255,
+          g=parseInt(m.slice(2,4),16)/255,
+          b=parseInt(m.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h,s,l=(max+min)/2;
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min;
+      s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){
+        case r: h=(g-b)/d+(g<b?6:0); break;
+        case g: h=(b-r)/d+2; break;
+        case b: h=(r-g)/d+4; break;
+      }
+      h/=6;
+    }
+    return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
+  }
+  const baseHSL = hexToHsl(BASE_HEX);
+  const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
+
+  // ========= Mapeo de niveles =========
+  function mapNivelDisplay(s){
+    const t = String(s||"").toUpperCase().trim();
+    if(t.includes("GOBIERNO NACIONAL"))  return "NACIONAL";
+    if(t.includes("GOBIERNOS REGIONALES"))return "REGIONAL";
+    if(t.includes("GOBIERNOS LOCALES"))  return "LOCAL";
+    if(t.includes("EMPRESAS MUNICIPALES DE AGUA POTABLE Y ALCANTARILLADO")) return "ETES"; // NUEVO
+    return null;
+  }
+  function mapNivelToOriginal(display){
+    const d = String(display||"").toUpperCase();
+    if(d==="NACIONAL") return "GOBIERNO NACIONAL";
+    if(d==="REGIONAL") return "GOBIERNOS REGIONALES";
+    if(d==="LOCAL")    return "GOBIERNOS LOCALES";
+    if(d==="ETES")     return "EMPRESAS MUNICIPALES DE AGUA POTABLE Y ALCANTARILLADO"; // NUEVO
+    return display;
+  }
+
+  // Orden de aparición en la leyenda / series
+  const ORDER = ["NACIONAL","REGIONAL","LOCAL","ETES"]; // ETES agregado
+
+  // ========= Helpers =========
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+  const $top = document.getElementById('topTitle');
+  const BASE_TITLE = "% Avance por nivel de gobierno";
+  const TITLE_DEPT = "% Avance por nivel de gobierno según departamento ejecutora";
+  const TITLE_PROV = "% Avance por nivel de gobierno según provincia ejecutora";
+  const TITLE_DIST = "% Avance por nivel de gobierno según distrito ejecutora";
+  function setTopTitle(t){ $top.textContent = t; }
+
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+
+  async function getJSON(url, params={}, timeoutMs=25000){
+    const u = qs(url, params);
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    let res;
+    try{
+      res = await fetch(u, { signal: ctrl.signal, mode: 'cors', credentials: 'omit' });
+    }finally{
+      clearTimeout(to);
+    }
+    if(!res.ok) throw new Error(`HTTP ${res.status} al consultar ${u}`);
+    const data = await res.json();
+    if(data.error) throw new Error((data.error && data.error.message) || "Error en respuesta del servicio");
+    return { data, url: u };
+  }
+
+  function esc(v){ return String(v).replace(/'/g,"''"); }
+
+  // ========= ECharts base =========
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', ()=>chart.resize());
+
+  const baseOption = {
+    backgroundColor: '#ffffff',
+    grid: { left: 96, right: 40, top: 68, bottom: 80, containLabel: true },
+    legend: {
+      top: 12,
+      left: 'center',
+      itemWidth: 32,
+      itemHeight: 12,
+      textStyle: { fontSize: 12 }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: (params)=>{
+        const year = params?.[0]?.axisValue ?? '';
+        const lines = [`<b>${year}</b>`];
+        (params||[]).forEach(p=>{
+          const v = Number(p.value);
+          if(!Number.isFinite(v)) return;
+          const pct = formatPercent(v);
+          lines.push(`${p.marker} ${p.seriesName}: <b>${pct}</b>`);
+        });
+        return lines.join('<br/>');
+      }
+    },
+    xAxis: {
+      type:'category',
+      boundaryGap:true,
+      name:'Años',
+      nameLocation:'middle',
+      nameGap:34,
+      axisTick:{alignWithLabel:true},
+      axisLabel:{margin:14},
+      animation:false,
+      data:[]
+    },
+    yAxis: {
+      type:'value',
+      name:'% Avance',
+      axisLabel:{ formatter:v=>formatPercent(v), margin:12 },
+      splitLine:{show:true},
+      scale:true
+    },
+    animation: true,
+    animationDuration: 1600,
+    animationDurationUpdate: 1600,
+    series: [],
+    graphic: []
+  };
+  chart.setOption(baseOption);
+
+  function backGraphic(color, onClick){
+    const stroke = color;
+    return [{
+      type: 'group',
+      left: 10,
+      top: 10,
+      z: 100,
+      bounding: 'all',
+      cursor: 'pointer',
+      onclick: onClick,
+      children: [
+        {
+          type:'circle',
+          shape:{cx:18, cy:18, r:18},
+          style:{
+            fill:'#fff',
+            stroke:stroke,
+            lineWidth:2,
+            shadowBlur:6,
+            shadowColor:'rgba(0,0,0,.08)'
+          }
+        },
+        {
+          type:'polyline',
+          shape:{points:[[22,10],[14,18],[22,26]]},
+          style:{stroke:stroke, lineWidth:3, lineCap:'round', lineJoin:'round'}
+        }
+      ]
+    }];
+  }
+
+  // ========= Serie (líneas: % Avance) =========
+  async function loadLine(){
+    setTopTitle(BASE_TITLE);
+
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField: F.monto, outStatisticFieldName:"sum_dev" },
+      { statisticType:"sum", onStatisticField: F.pim,   outStatisticFieldName:"sum_pim" }
+    ]);
+
+    const res = await getJSON(tableUrl + "/query", {
+      where:
+        `(${F.anio} IS NOT NULL) AND ` +
+        `(${F.monto} IS NOT NULL) AND (${F.pim} IS NOT NULL) AND (${F.pim} <> 0) AND ` +
+        `(${F.nivel} IS NOT NULL) AND ` +
+        `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO')`,
+      groupByFieldsForStatistics: `${F.anio},${F.nivel}`,
+      outStatistics: outStats,
+      orderByFields: `${F.anio} ASC, ${F.nivel} ASC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error("La consulta no devolvió filas.");
+
+    const agg = new Map(); // key: displayNivel|anio -> %Avance
+    const yearsSet = new Set();
+
+    features.forEach(f=>{
+      const attrs = f.attributes || {};
+      const a = Number(attrs[F.anio]);
+      const nivelRaw = attrs[F.nivel];
+      const sumDev = Number(attrs["sum_dev"]);
+      const sumPim = Number(attrs["sum_pim"]);
+      const disp = mapNivelDisplay(nivelRaw);
+
+      if(!disp || !Number.isFinite(a) || !Number.isFinite(sumDev) || !Number.isFinite(sumPim) || sumPim <= 0) return;
+
+      const pct = Math.round((sumDev / sumPim) * 100);
+      if(!Number.isFinite(pct)) return;
+
+      yearsSet.add(a);
+      const key = disp + "|" + a;
+      agg.set(key, pct);
+    });
+
+    const years = Array.from(yearsSet).sort((a,b)=>a-b).map(String);
+
+    const seriesPrep = ORDER.map(name=>{
+      const data = years.map(y => (agg.has(name+"|"+y) ? agg.get(name+"|"+y) : null));
+      return { name, data };
+    }).filter(s => s.data.some(v=>v!=null));
+
+    const n = Math.max(1, seriesPrep.length);
+    const minL = Math.max(18, baseHSL.l - 12);
+    const maxL = Math.min(85, baseHSL.l + 26);
+    const stepL = (i)=> Math.round(minL + (maxL - minL) * (i/(n-1 || 1)));
+
+    const series = seriesPrep.map((s,i)=>{
+      // Color: ETES será rojo fijo, los demás derivados de la paleta base
+      let col;
+      if (s.name === "ETES"){
+        col = "#dc2626"; // rojo
+      } else {
+        col = hsl(baseHSL.h, baseHSL.s, stepL(i));
+      }
+
+      // Tipo de línea y estilo
+      let lineType = 'solid';
+      let smooth = true;
+      let step = false;
+
+      if(s.name === "NACIONAL"){
+        lineType = 'solid';
+      }else if(s.name === "REGIONAL"){
+        lineType = 'dashed';
+      }else if(s.name === "LOCAL"){
+        lineType = 'dotted';
+      }else if(s.name === "ETES"){
+        lineType = 'solid';   // base sólida
+        smooth = false;       // sin suavizado
+        step = 'middle';      // línea en escalones (tipo visual distinto)
+      }
+
+      return {
+        name: s.name,
+        type: 'line',
+        smooth: smooth,
+        step: step, // null/false para las demás, 'middle' para ETES
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2, color: col, type: lineType },
+        itemStyle: { color: col },
+        emphasis: { focus: 'series', scale: false },
+        clip: true,
+        data: s.data,
+        _color: col
+      };
+    });
+
+    const vals = series.flatMap(s=>s.data).filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const pad = Math.max((max - min) * 0.10, max*0.02);
+
+    chart.clear();
+    chart.setOption({
+      ...baseOption,
+      xAxis: { ...baseOption.xAxis, data: years },
+      yAxis: {
+        ...baseOption.yAxis,
+        min: Math.max(0, Math.floor(min - pad)),
+        max: Math.ceil(max + pad)
+      },
+      legend: { ...baseOption.legend, data: series.map(s=>s.name) },
+      series,
+      graphic: []
+    });
+
+    let labelsShown = false;
+    chart.off('finished');
+    chart.on('finished', ()=>{
+      if(labelsShown) return;
+      labelsShown = true;
+      chart.setOption({
+        series: series.map(()=>({
+          label:{
+            show:true,
+            position:'bottom',
+            distance:4,
+            fontSize:12,
+            color:'#111827',
+            formatter:(p)=> (p.value==null||isNaN(p.value)) ? '' : formatPercent(+p.value)
+          },
+          labelLayout:{ hideOverlap: true }
+        }))
+      });
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='line'){
+        const year = String(ev.name);
+        const nivelDisplay = ev.seriesName;
+        const color = chart.getOption().series[ev.seriesIndex]._color || '#3b82f6';
+        drillStack = [];
+        loadBarsDept({year, nivelDisplay, color}).catch(showErr);
+      }
+    });
+  }
+
+  // ========= Pila navegación =========
+  let drillStack = [];
+  function pushBack(fn){ drillStack.push(fn); }
+  async function goBack(){
+    if(!drillStack.length){ await loadLine(); return; }
+    const fn = drillStack.pop();
+    await fn();
+  }
+
+  // ========= Barras: Departamento (% Avance) =========
+  async function loadBarsDept({year, nivelDisplay, color}){
+    setTopTitle(TITLE_DEPT);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_dev" },
+      { statisticType:"sum", onStatisticField:F.pim,   outStatisticFieldName:"sum_pim" }
+    ]);
+
+    const res = await getJSON(tableUrl + "/query", {
+      where:
+        `${F.anio}=${Number(year)} AND ` +
+        `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+        `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ` +
+        `${F.monto} IS NOT NULL AND ${F.pim} IS NOT NULL AND ${F.pim} <> 0 AND ` +
+        `${F.dpto} IS NOT NULL`,
+      groupByFieldsForStatistics: F.dpto,
+      outStatistics: outStats,
+      orderByFields: `sum_dev DESC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${nivelDisplay} en ${year}.`);
+
+    let rows = features.map(f=>{
+      const attrs = f.attributes || {};
+      const nameRaw = attrs[F.dpto];
+      const sumDev = Number(attrs.sum_dev);
+      const sumPim = Number(attrs.sum_pim);
+      if(!nameRaw || !Number.isFinite(sumDev) || !Number.isFinite(sumPim) || sumPim <= 0) return null;
+      const pct = Math.round((sumDev / sumPim) * 100);
+      if(!Number.isFinite(pct)) return null;
+      return { name: String(nameRaw), val:pct };
+    }).filter(Boolean)
+      .sort((a,b)=>b.val-a.val);
+
+    const x = rows.map(r=>r.name);
+    const y = rows.map(r=>r.val);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0];
+          if(!p) return '';
+          const v = Number(p.value);
+          const pct = formatPercent(v);
+          const label = formatLocationName(p.axisValue);
+          return `${label}<br><b>${pct}</b>`;
+        }
+      },
+      title:{
+        left:'center',
+        top:10,
+        text:`% Avance — ${nivelDisplay} — ${year}`
+      },
+      xAxis:{
+        type:'category',
+        data:x,
+        axisLabel:{
+          interval:0,
+          rotate:(x.length>18?40:(x.length>12?25:0)),
+          formatter: formatLocationName
+        }
+      },
+      yAxis:{
+        type:'value',
+        name:'% Avance',
+        axisLabel:{ formatter:v=>formatPercent(v) },
+        scale:true
+      },
+      series:[{
+        name:'Departamento',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{
+          show:true,
+          position:'top',
+          formatter:(p)=>formatPercent(+p.value)
+        }
+      }],
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        const depRaw = ev.name; // nombre real (sin formatear)
+        pushBack(()=>loadBarsDept({year, nivelDisplay, color}));
+        loadBarsProv({year, nivelDisplay, dep: depRaw, color}).catch(showErr);
+      }
+    });
+
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+  }
+
+  // ========= Barras: Provincia (% Avance) =========
+  async function loadBarsProv({year, nivelDisplay, dep, color}){
+    setTopTitle(TITLE_PROV);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_dev" },
+      { statisticType:"sum", onStatisticField:F.pim,   outStatisticFieldName:"sum_pim" }
+    ]);
+
+    const where =
+      `${F.anio}=${Number(year)} AND ` +
+      `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ` +
+      `${F.monto} IS NOT NULL AND ${F.pim} IS NOT NULL AND ${F.pim} <> 0 AND ` +
+      `${F.prov} IS NOT NULL AND ` +
+      `UPPER(${F.dpto})=UPPER('${esc(dep)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: F.prov,
+      outStatistics: outStats,
+      orderByFields: `sum_dev DESC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${dep} — ${nivelDisplay} en ${year}.`);
+
+    let rows = features.map(f=>{
+      const attrs = f.attributes || {};
+      const nameRaw = attrs[F.prov];
+      const sumDev = Number(attrs.sum_dev);
+      const sumPim = Number(attrs.sum_pim);
+      if(!nameRaw || !Number.isFinite(sumDev) || !Number.isFinite(sumPim) || sumPim <= 0) return null;
+      const pct = Math.round((sumDev / sumPim) * 100);
+      if(!Number.isFinite(pct)) return null;
+      return { name:String(nameRaw), val:pct };
+    }).filter(Boolean)
+      .sort((a,b)=>b.val-a.val);
+
+    const x = rows.map(r=>r.name);
+    const y = rows.map(r=>r.val);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0];
+          if(!p) return '';
+          const v = Number(p.value);
+          const pct = formatPercent(v);
+          const label = formatLocationName(p.axisValue);
+          return `${label}<br><b>${pct}</b>`;
+        }
+      },
+      title:{
+        left:'center',
+        top:10,
+        text:`% Avance — ${nivelDisplay} — ${year} — ${formatLocationName(dep)}`
+      },
+      xAxis:{
+        type:'category',
+        data:x,
+        axisLabel:{
+          interval:0,
+          rotate:(x.length>18?40:(x.length>12?25:0)),
+          formatter: formatLocationName
+        }
+      },
+      yAxis:{
+        type:'value',
+        name:'% Avance',
+        axisLabel:{ formatter:v=>formatPercent(v) },
+        scale:true
+      },
+      series:[{
+        name:'Provincia',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{
+          show:true,
+          position:'top',
+          formatter:(p)=>formatPercent(+p.value)
+        }
+      }],
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='bar'){
+        const provRaw = ev.name;
+        pushBack(()=>loadBarsProv({year, nivelDisplay, dep, color}));
+        loadBarsDist({year, nivelDisplay, dep, prov: provRaw, color}).catch(showErr);
+      }
+    });
+
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+  }
+
+  // ========= Barras: Distrito (% Avance) =========
+  async function loadBarsDist({year, nivelDisplay, dep, prov, color}){
+    setTopTitle(TITLE_DIST);
+
+    const nivelOriginal = mapNivelToOriginal(nivelDisplay);
+    const outStats = JSON.stringify([
+      { statisticType:"sum", onStatisticField:F.monto, outStatisticFieldName:"sum_dev" },
+      { statisticType:"sum", onStatisticField:F.pim,   outStatisticFieldName:"sum_pim" }
+    ]);
+
+    const where =
+      `${F.anio}=${Number(year)} AND ` +
+      `UPPER(${F.nivel})=UPPER('${esc(nivelOriginal)}') AND ` +
+      `UPPER(${F.funcion}) IN ('SANEAMIENTO','SALUD Y SANEAMIENTO') AND ` +
+      `${F.monto} IS NOT NULL AND ${F.pim} IS NOT NULL AND ${F.pim} <> 0 AND ` +
+      `${F.dist} IS NOT NULL AND ` +
+      `UPPER(${F.dpto})=UPPER('${esc(dep)}') AND ` +
+      `UPPER(${F.prov})=UPPER('${esc(prov)}')`;
+
+    const res = await getJSON(tableUrl + "/query", {
+      where,
+      groupByFieldsForStatistics: F.dist,
+      outStatistics: outStats,
+      orderByFields: `sum_dev DESC`,
+      returnGeometry: "false",
+      f: "json",
+      resultType: "standard",
+      cacheHint: "true"
+    });
+
+    const features = (res.data && res.data.features) || [];
+    if(!features.length) throw new Error(`Sin datos para ${prov} — ${dep} — ${nivelDisplay} en ${year}.`);
+
+    let rows = features.map(f=>{
+      const attrs = f.attributes || {};
+      const nameRaw = attrs[F.dist];
+      const sumDev = Number(attrs.sum_dev);
+      const sumPim = Number(attrs.sum_pim);
+      if(!nameRaw || !Number.isFinite(sumDev) || !Number.isFinite(sumPim) || sumPim <= 0) return null;
+      const pct = Math.round((sumDev / sumPim) * 100);
+      if(!Number.isFinite(pct)) return null;
+      return { name:String(nameRaw), val:pct };
+    }).filter(Boolean)
+      .sort((a,b)=>b.val-a.val);
+
+    const x = rows.map(r=>r.name);
+    const y = rows.map(r=>r.val);
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor:'#ffffff',
+      grid:{ left:96, right:40, top:68, bottom:80, containLabel:true },
+      legend:{ show:false },
+      tooltip:{
+        trigger:'axis',
+        axisPointer:{ type:'shadow' },
+        formatter:(params)=>{
+          const p = params && params[0];
+          if(!p) return '';
+          const v = Number(p.value);
+          const pct = formatPercent(v);
+          const label = formatLocationName(p.axisValue);
+          return `${label}<br><b>${pct}</b>`;
+        }
+      },
+      title:{
+        left:'center',
+        top:10,
+        text:`% Avance — ${nivelDisplay} — ${year} — ${formatLocationName(dep)} — ${formatLocationName(prov)}`
+      },
+      xAxis:{
+        type:'category',
+        data:x,
+        axisLabel:{
+          interval:0,
+          rotate:(x.length>18?40:(x.length>12?25:0)),
+          formatter: formatLocationName
+        }
+      },
+      yAxis:{
+        type:'value',
+        name:'% Avance',
+        axisLabel:{ formatter:v=>formatPercent(v) },
+        scale:true
+      },
+      series:[{
+        name:'Distrito',
+        type:'bar',
+        data:y,
+        itemStyle:{ color: color },
+        label:{
+          show:true,
+          position:'top',
+          formatter:(p)=>formatPercent(+p.value)
+        }
+      }],
+      animation:true,
+      animationDuration:1200,
+      graphic: backGraphic(color, ()=>goBack())
+    });
+
+    chart.off('click');
+    chart.on('click', ()=>{});
+    document.onkeydown = async (e)=>{ if(e.key==='Escape') goBack(); };
+  }
+
+  // ========= Flujo =========
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  (async function run(){
+    try{
+      $loading.style.display = 'flex';
+      await loadLine();
+      $loading.style.display = 'none';
+      $err.style.display = 'none';
+      $err.textContent = '';
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{
+    showErr(ev && ev.message ? ev.message : ev);
+  }, true);
+})();
+</script>
+</body>
+</html>
