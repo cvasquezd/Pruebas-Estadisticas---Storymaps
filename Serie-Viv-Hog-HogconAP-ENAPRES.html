@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Número de Viviendas, Número de Hogares y Hogares con acceso a agua</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    :root{ --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#fafafa; --shadow:0 6px 28px rgba(0,0,0,.08); }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+    h1{font-weight:800;font-size:20px;margin:0 0 6px;text-align:center}
+    .sub{color:var(--muted);font-size:12px;margin:0 0 12px;text-align:center}
+    .headbar{display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; margin:0 0 10px;}
+    .seg{display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-left:auto;}
+    .seg button{
+      appearance:none; border:1px solid rgba(47,72,88,.25);
+      background:#fff; color:#111827; cursor:pointer;
+      padding:6px 10px; border-radius:999px;
+      font-size:12px; font-weight:700;
+      box-shadow:0 1px 0 rgba(0,0,0,.02);
+      transition:transform .08s ease, background .15s ease, border-color .15s ease;
+    }
+    .seg button:hover{ transform: translateY(-1px); }
+    .seg button.active{ background: rgba(47,72,88,.10); border-color: rgba(47,72,88,.45); }
+
+    #chart{height:78vh;min-height:560px;background:var(--card);border-radius:16px;box-shadow:var(--shadow);position:relative}
+    #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b7280}
+    #err{margin-top:10px;color:#b91c1c;font-size:12px;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <h1 id="mainTitle">Número de Viviendas, Número de Hogares y Hogares con acceso a agua a nivel Nacional</h1>
+  <p class="sub">Fuente: ENAPRES</p>
+
+  <div class="headbar">
+    <div id="segWrap" class="seg" aria-label="Segmentación por ámbito">
+      <button type="button" data-amb="TOTAL"  class="active">TOTAL</button>
+      <button type="button" data-amb="URBANO">URBANO</button>
+      <button type="button" data-amb="RURAL">RURAL</button>
+    </div>
+  </div>
+
+  <div id="chart"><div id="loading">Cargando datos…</div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function(){
+  const TITLE_NACIONAL = "Número de Viviendas, Número de Hogares y Hogares con acceso a agua a nivel Nacional";
+  const TITLE_REGIONAL = "Número de Viviendas, Número de Hogares y Hogares con acceso a agua a nivel regional";
+  const $mainTitle = document.getElementById('mainTitle');
+
+  const SERVICE  = "https://portalgis.vivienda.gob.pe/servergis/rest/services/OGEI/Mapa_Indicadores_Indice_DB/FeatureServer";
+  const TABLE_ID = "1";
+  const tableUrl = SERVICE + "/" + TABLE_ID;
+
+  const REGION_NACIONAL = "NACIONAL";
+  const EXCLUDE_REGION_LIKE_1 = "PROVINCIA DE LIMA";
+  const EXCLUDE_REGION_LIKE_2 = "LIMA PROVINCIAS";
+  const IND_VIV = "IND_1_VIV";
+  const IND_HOG = "IND_1_HOG";
+  const DVAL_ACCESO = "CON ACCESO";
+
+  const nf2 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Tooltip: miles (2 decimales)
+  const formatMil = (v)=> (v==null || !isFinite(v)) ? "—" : `${nf2.format(+v)} mil`;
+
+  // Labels + eje: millones (2 decimales). Dato viene en "miles".
+  const formatMillones = (vMil)=> (vMil==null || !isFinite(vMil)) ? "—" : `${nf2.format((+vMil)/1000)} Mill.`;
+
+  // ===== Colores
+  const BASE_HEX = "#2F4858";
+  function hexToHsl(hex){
+    const m=hex.replace('#','');
+    const r=parseInt(m.slice(0,2),16)/255, g=parseInt(m.slice(2,4),16)/255, b=parseInt(m.slice(4,6),16)/255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b); let h,s,l=(max+min)/2;
+    if(max===min){h=s=0;}
+    else{
+      const d=max-min; s=l>0.5? d/(2-max-min) : d/(max+min);
+      switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break;}
+      h/=6;
+    }
+    return {h:Math.round(h*360), s:Math.round(s*100), l:Math.round(l*100)};
+  }
+  const baseHSL = hexToHsl(BASE_HEX);
+  const hsl = (h,s,l,a=1)=>`hsla(${h} ${s}% ${l}% / ${a})`;
+  const COL_VIV = hsl(baseHSL.h, baseHSL.s, Math.min(82, baseHSL.l + 26));
+  const COL_HOG = hsl(baseHSL.h, baseHSL.s, baseHSL.l);
+  const COL_ACC = "#0084DC";
+
+  function makeLegendLineIcon(color, lineType){
+    const dash = lineType==='dashed' ? '8,6' : (lineType==='dotted' ? '2,6' : '');
+    try{
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="14" viewBox="0 0 48 14">
+           <path d="M3 7 H45" fill="none" stroke="${color}" stroke-width="2.8" stroke-linecap="round"
+                 ${dash ? `stroke-dasharray="${dash}"` : ''}/>
+           <circle cx="24" cy="7" r="3.2" fill="${color}" />
+         </svg>`;
+      return 'image://data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    }catch(_){
+      return 'roundRect';
+    }
+  }
+
+  const $err = document.getElementById('err');
+  const $loading = document.getElementById('loading');
+  const $segWrap = document.getElementById('segWrap');
+  const segButtons = Array.from($segWrap.querySelectorAll('button[data-amb]'));
+
+  function qs(url, params){ return url + "?" + new URLSearchParams(params).toString(); }
+  function jsonp(url, params, timeoutMs=25000){
+    return new Promise((resolve, reject)=>{
+      const cb = "__arcgis_cb_" + Math.random().toString(36).slice(2);
+      params = { ...(params||{}), callback: cb };
+      const u = qs(url, params);
+      const s = document.createElement('script');
+      let settled=false;
+      const timer = setTimeout(()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Timeout JSONP: " + u)); }, timeoutMs);
+      function cleanup(){ clearTimeout(timer); if (s.parentNode) s.parentNode.removeChild(s); try{ delete window[cb]; }catch(_){ } }
+      window[cb] = (data)=>{ if(settled) return; settled=true; cleanup(); resolve({data, url:u}); };
+      s.src = u;
+      s.onerror = ()=>{ if(settled) return; settled=true; cleanup(); reject(new Error("Error de script JSONP: " + u)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // ====== paginación ArcGIS (si excede límite)
+  async function queryAll(where, outFields, orderByFields){
+    const pageSize = 2000;
+    let offset = 0;
+    let all = [];
+    while(true){
+      const res = await jsonp(tableUrl + "/query", {
+        where,
+        outFields,
+        orderByFields,
+        returnGeometry: "false",
+        returnDistinctValues: "false",
+        resultRecordCount: String(pageSize),
+        resultOffset: String(offset),
+        f: "json"
+      }, 30000);
+
+      const feats = (res.data && res.data.features) || [];
+      all.push(...feats);
+
+      const exceeded = !!(res.data && res.data.exceededTransferLimit);
+      if(!exceeded && feats.length < pageSize) break;
+      offset += pageSize;
+      if(feats.length === 0) break;
+    }
+    return all;
+  }
+
+  const normalize = (s)=> String(s||"").trim().toUpperCase();
+  const cleanTxt = (s)=> String(s==null?"":s).trim();
+
+  const chart = echarts.init(document.getElementById('chart'));
+  window.addEventListener('resize', ()=>chart.resize());
+
+  function backGraphic(color, onClick){
+    const stroke = color;
+    return [{
+      type: 'group',
+      left: 10, top: 10, z: 100,
+      bounding: 'all',
+      cursor: 'pointer',
+      onclick: onClick,
+      children: [
+        {type:'circle', shape:{cx:18, cy:18, r:18}, style:{fill:'#fff', stroke:stroke, lineWidth:2, shadowBlur:6, shadowColor:'rgba(0,0,0,.08)'}},
+        {type:'polyline', shape:{points:[[22,10],[14,18],[22,26]]}, style:{stroke:stroke, lineWidth:3, lineCap:'round', lineJoin:'round'}}
+      ]
+    }];
+  }
+
+  let currentAmbito = "TOTAL";
+  let inDrill = false;
+
+  // ======= helper: agrega por año (promedio por si hay duplicados)
+  function aggByYear(feats, field){
+    const map = new Map(); // year -> {sum,c}
+    for(const f of feats){
+      const r = f.attributes || {};
+      const y = String(r.anio);
+      const v = (r[field]!=null ? Number(r[field]) : null);
+      if(!y || v==null || !isFinite(v)) continue;
+      const it = map.get(y) || {sum:0,c:0};
+      it.sum += v; it.c += 1;
+      map.set(y, it);
+    }
+    const years = Array.from(map.keys()).map(Number).sort((a,b)=>a-b).map(String);
+    const data = years.map(y=>{ const it=map.get(y); return it && it.c ? (it.sum/it.c) : null; });
+    return { years, data };
+  }
+
+  function calcYRange(allValues){
+    const vals = allValues.filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = Math.max(1e-6, (max - min));
+    // aire adicional: acerca el inicio al eje X (yMin más bajo) y deja más headroom arriba
+    const padLow  = Math.max(range * 0.20, 30);
+    const padHigh = Math.max(range * 0.55, 60); // más alto para “separar” visualmente
+    const yMin = Math.max(0, Math.floor((min - padLow) / 10) * 10);
+    const yMax = Math.ceil((max + padHigh) / 10) * 10;
+    return { yMin, yMax };
+  }
+
+  async function loadLine(ambitoSel){
+    inDrill = false;
+    currentAmbito = ambitoSel;
+    $segWrap.style.display = "flex";
+    $mainTitle.textContent = TITLE_NACIONAL;
+
+    // 3 queries pequeñas (rápidas)
+    const whereViv =
+      `UPPER(region)=UPPER('${REGION_NACIONAL}') AND UPPER(ambito)=UPPER('${ambitoSel}') AND UPPER(id_indicador)=UPPER('${IND_VIV}')`;
+    const whereHog =
+      `UPPER(region)=UPPER('${REGION_NACIONAL}') AND UPPER(ambito)=UPPER('${ambitoSel}') AND UPPER(id_indicador)=UPPER('${IND_HOG}')`;
+    const whereAcc =
+      `UPPER(region)=UPPER('${REGION_NACIONAL}') AND UPPER(ambito)=UPPER('${ambitoSel}') AND UPPER(id_indicador)=UPPER('${IND_HOG}') AND UPPER(d_valores)=UPPER('${DVAL_ACCESO}')`;
+
+    const [fViv, fHog, fAcc] = await Promise.all([
+      queryAll(whereViv, "anio,total_num_absoluto", "anio ASC"),
+      queryAll(whereHog, "anio,total_num_absoluto", "anio ASC"),
+      queryAll(whereAcc, "anio,valor_recuento", "anio ASC")
+    ]);
+
+    if(!fViv.length && !fHog.length && !fAcc.length) throw new Error(`Sin datos para ${ambitoSel} / NACIONAL.`);
+
+    const aViv = aggByYear(fViv, "total_num_absoluto");
+    const aHog = aggByYear(fHog, "total_num_absoluto");
+    const aAcc = aggByYear(fAcc, "valor_recuento");
+
+    // años unificados
+    const yearSet = new Set([...aViv.years, ...aHog.years, ...aAcc.years]);
+    const years = Array.from(yearSet).map(Number).sort((a,b)=>a-b).map(String);
+
+    const mapViv = new Map(aViv.years.map((y,i)=>[y, aViv.data[i]]));
+    const mapHog = new Map(aHog.years.map((y,i)=>[y, aHog.data[i]]));
+    const mapAcc = new Map(aAcc.years.map((y,i)=>[y, aAcc.data[i]]));
+
+    const sViv = years.map(y=> mapViv.has(y) ? mapViv.get(y) : null);
+    const sHog = years.map(y=> mapHog.has(y) ? mapHog.get(y) : null);
+    const sAcc = years.map(y=> mapAcc.has(y) ? mapAcc.get(y) : null);
+
+    const { yMin, yMax } = calcYRange([...sViv, ...sHog, ...sAcc]);
+
+    const option = {
+      backgroundColor: '#ffffff',
+      grid: { left: 130, right: 90, top: 46, bottom: 90, containLabel: true },
+      legend: {
+        show: true,
+        bottom: 16,
+        left: 'center',
+        orient: 'horizontal',
+        itemWidth: 48,
+        itemHeight: 14,
+        itemGap: 22,
+        textStyle: { fontSize: 12, color:'#111827', fontWeight: 500 },
+        data: [
+          { name:"Número de Viviendas", icon: makeLegendLineIcon(COL_VIV, 'solid') },
+          { name:"Número de Hogares",  icon: makeLegendLineIcon(COL_HOG, 'dashed') },
+          { name:"Hogares con acceso a agua", icon: makeLegendLineIcon(COL_ACC, 'dotted') }
+        ]
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line' },
+        formatter: (params)=>{
+          const year = params?.[0]?.axisValue ?? '';
+          const lines = [`<b>Año: ${year}</b>`];
+          (params||[]).forEach(p=>{
+            lines.push(`${p.marker} ${p.seriesName}: <b>${formatMil(p.value)}</b>`);
+          });
+          return lines.join('<br/>');
+        }
+      },
+      xAxis: {
+        type:'category',
+        boundaryGap:true,
+        name:'Año',
+        nameLocation:'middle',
+        nameGap:34,
+        axisTick:{alignWithLabel:true},
+        axisLabel:{margin:14},
+        data: years
+      },
+      yAxis: {
+        type:'value',
+        name:'',
+        min: yMin,
+        max: yMax,
+        scale:true,
+        splitNumber: 6,
+        axisLabel:{ formatter:v=> `${nf2.format(v/1000)} Mill.`, margin:14 },
+        splitLine:{ show:true }
+      },
+      series: [
+        { name:"Número de Viviendas", type:"line", smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+          lineStyle:{ width:2, color:COL_VIV, type:'solid' }, itemStyle:{ color:COL_VIV },
+          emphasis:{ focus:'series', scale:false }, data:sViv, _drillKey:"VIV" },
+        { name:"Número de Hogares", type:"line", smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+          lineStyle:{ width:2, color:COL_HOG, type:'dashed' }, itemStyle:{ color:COL_HOG },
+          emphasis:{ focus:'series', scale:false }, data:sHog, _drillKey:"HOG" },
+        { name:"Hogares con acceso a agua", type:"line", smooth:true, showSymbol:true, symbol:'circle', symbolSize:6,
+          lineStyle:{ width:2, color:COL_ACC, type:'dotted' }, itemStyle:{ color:COL_ACC },
+          emphasis:{ focus:'series', scale:false }, data:sAcc, _drillKey:"ACC" }
+      ]
+    };
+
+    chart.clear();
+    chart.setOption(option);
+
+    let labelsShown = false;
+    chart.off('finished');
+    chart.on('finished', ()=>{
+      if(labelsShown) return; labelsShown = true;
+      chart.setOption({
+        series: option.series.map(()=>({
+          label:{
+            show:true,
+            position:'top',
+            distance:6,
+            fontSize:11,
+            color:'#111827',
+            formatter:(p)=> (p.value==null||!isFinite(p.value)) ? '' : formatMillones(p.value)
+          },
+          labelLayout:{ hideOverlap:true }
+        }))
+      });
+    });
+
+    chart.off('click');
+    chart.on('click', (ev)=>{
+      if(ev.componentType==='series' && ev.seriesType==='line'){
+        const year = String(ev.name);
+        const sName = String(ev.seriesName || "");
+        const key   = (chart.getOption().series?.[ev.seriesIndex]?._drillKey) || "";
+        const color = (key==="VIV") ? COL_VIV : (key==="HOG") ? COL_HOG : COL_ACC;
+        loadBars({ year, ambito: ambitoSel, seriesKey:key, seriesName:sName, color }).catch(showErr);
+      }
+    });
+
+    document.onkeydown = null;
+  }
+
+  async function loadBars({year, ambito, seriesKey, seriesName, color}){
+    inDrill = true;
+    $segWrap.style.display = "none";
+    $mainTitle.textContent = TITLE_REGIONAL;
+
+    const isACC = (seriesKey === "ACC");
+    const indicator = (seriesKey === "VIV") ? IND_VIV : IND_HOG;
+    const valueField = isACC ? "valor_recuento" : "total_num_absoluto";
+
+    const where =
+      `anio=${Number(year)} AND ` +
+      `UPPER(ambito)=UPPER('${ambito}') AND ` +
+      `UPPER(id_indicador)=UPPER('${indicator}') AND ` +
+      (isACC ? `UPPER(d_valores)=UPPER('${DVAL_ACCESO}') AND ` : ``) +
+      `UPPER(region) <> UPPER('NACIONAL') AND ` +
+      `UPPER(region) NOT LIKE '${EXCLUDE_REGION_LIKE_1}%' AND ` +
+      `UPPER(region) NOT LIKE '${EXCLUDE_REGION_LIKE_2}%'`;
+
+    const outFields = `region,${valueField}`;
+    const feats = await queryAll(where, outFields, "region ASC");
+    if(!feats.length) throw new Error(`Sin datos para "${seriesName}" en ${ambito} / ${year}.`);
+
+    // promedio por región (si hubiese duplicados)
+    const tmp = new Map();
+    for(const f of feats){
+      const r = f.attributes || {};
+      const reg = cleanTxt(r.region);
+      if(!reg) continue;
+      const val = (r[valueField]!=null ? Number(r[valueField]) : null);
+      if(val==null || !isFinite(val)) continue;
+      const it = tmp.get(reg) || { sum:0, c:0 };
+      it.sum += val; it.c += 1;
+      tmp.set(reg, it);
+    }
+
+    let rows = Array.from(tmp.entries())
+      .map(([region,o])=>({ region, valor: o.c ? (o.sum/o.c) : null }))
+      .filter(x=>x.valor!=null && isFinite(x.valor));
+
+    rows.sort((a,b)=>b.valor-a.valor);
+
+    const x = rows.map(r=>r.region);
+    const y = rows.map(r=>r.valor);
+
+    const vals = y.filter(v=>v!=null && isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = Math.max(1e-6, (max - min));
+    const padTop = Math.max(range * 0.25, 3);
+    const yMin = Math.max(0, Math.floor((min - padTop) * 100)/100);
+    const yMax = Math.ceil((max + padTop) * 100)/100;
+
+    chart.clear();
+    chart.setOption({
+      backgroundColor: '#ffffff',
+      grid: { left: 110, right: 40, top: 62, bottom: 95, containLabel: true },
+      title: {
+        left:'center',
+        top: 10,
+        text: `${seriesName} - ${ambito} - ${year}`,
+        textStyle:{ fontSize: 13, fontWeight: 800, color:'#111827' }
+      },
+      legend: { show:false },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type:'shadow' },
+        formatter: (params)=>{
+          const p = params && params[0];
+          if(!p) return '';
+          return [
+            `<b>Año: ${year}</b>`,
+            `Región: ${p.axisValueLabel}`,
+            `Valor: <b>${formatMil(p.value)}</b>`
+          ].join('<br/>');
+        }
+      },
+      xAxis: {
+        type:'category',
+        data: x,
+        axisLabel:{ interval:0, rotate: (x.length>18?45:(x.length>12?30:0)) }
+      },
+      yAxis: {
+        type:'value',
+        name:'',
+        min: yMin,
+        max: Math.ceil((yMax * 1.18) * 100) / 100, // headroom para label
+        scale:true,
+        axisLabel:{ formatter:v=> `${nf2.format(v/1000)} Mill.` }
+      },
+      series: [{
+        name: seriesName,
+        type: 'bar',
+        data: y,
+        itemStyle: { color: color },
+        label: {
+          show:true,
+          position:'top',
+          distance: 22,     // ✅ separación real de la barra
+          rotate: 90,
+          fontSize: 9,
+          color: '#111827',
+          formatter:(p)=>formatMillones(p.value)
+        },
+        labelLayout: { hideOverlap: true }
+      }],
+      animation: true,
+      animationDuration: 1000,
+      graphic: backGraphic(color, async ()=>{
+        try { await loadLine(currentAmbito); } catch(e){ showErr(e); }
+      })
+    });
+
+    document.onkeydown = async (e)=>{
+      if(e.key === 'Escape'){
+        document.onkeydown = null;
+        await loadLine(currentAmbito).catch(showErr);
+      }
+    };
+  }
+
+  function setActiveAmb(amb){
+    segButtons.forEach(b=> b.classList.toggle('active', b.getAttribute('data-amb') === amb));
+  }
+  segButtons.forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const amb = btn.getAttribute('data-amb');
+      if(!amb || amb === currentAmbito) return;
+      if(inDrill) return;
+      try{
+        setActiveAmb(amb);
+        $loading.style.display = 'flex';
+        await loadLine(amb);
+        $loading.style.display = 'none';
+        $err.style.display = 'none';
+      }catch(e){ showErr(e); }
+    });
+  });
+
+  function showErr(e){
+    $loading.style.display = 'none';
+    $err.style.display = 'block';
+    $err.textContent = "Error: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+
+  (async function run(){
+    try{
+      $loading.style.display = 'flex';
+      setActiveAmb("TOTAL");
+      await loadLine("TOTAL");
+      $loading.style.display = 'none';
+      $err.style.display = 'none';
+      $err.textContent = '';
+    }catch(e){ showErr(e); }
+  })();
+
+  window.addEventListener('error', (ev)=>{
+    showErr(ev && ev.message ? ev.message : ev);
+  }, true);
+})();
+</script>
+</body>
+</html>
